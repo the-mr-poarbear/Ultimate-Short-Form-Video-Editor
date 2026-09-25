@@ -494,26 +494,50 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
   const setSliceSettingsOpen = useEditorStore((s) => s.setSliceSettingsOpen);
   const characters = useCharacterStore((s) => s.characters);
 
+  const outerContainerRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bgVideoRef = useRef<HTMLVideoElement | null>(null);
 
+  const [frameDimensions, setFrameDimensions] = React.useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
   // Dynamic preview scale factor matching the 1080x1920 canvas
   const [previewScale, setPreviewScale] = React.useState<number>(0.28);
 
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
+    const outerEl = outerContainerRef.current;
+    if (!outerEl) return;
 
-    const updateScale = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.height > 0) {
-        setPreviewScale(rect.height / 1920);
+    const updateScaleAndSize = () => {
+      const rect = outerEl.getBoundingClientRect();
+      // Outer div has p-2 (8px on each side = 16px total)
+      const availableW = Math.max(10, rect.width - 16);
+      const availableH = Math.max(10, rect.height - 16);
+
+      let targetW: number;
+      let targetH: number;
+
+      if (availableW / availableH > 9 / 16) {
+        targetH = availableH;
+        targetW = targetH * (9 / 16);
+      } else {
+        targetW = availableW;
+        targetH = targetW * (16 / 9);
+      }
+
+      const w = Math.round(targetW);
+      const h = Math.round(targetH);
+
+      setFrameDimensions({ width: w, height: h });
+      if (h > 0) {
+        setPreviewScale(h / 1920);
       }
     };
 
-    updateScale();
-    const observer = new ResizeObserver(updateScale);
-    observer.observe(el);
+    updateScaleAndSize();
+    const observer = new ResizeObserver(updateScaleAndSize);
+    observer.observe(outerEl);
     return () => observer.disconnect();
   }, []);
 
@@ -953,7 +977,10 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
   );
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-black/80 p-2 select-none overflow-hidden">
+    <div
+      ref={outerContainerRef}
+      className="relative w-full h-full flex items-center justify-center bg-black/80 p-2 select-none overflow-hidden"
+    >
       {/* 9:16 Aspect Ratio Frame */}
       <div
         ref={containerRef}
@@ -980,7 +1007,12 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
             }
           } catch {}
         }}
-        className="relative h-full aspect-[9/16] max-w-full bg-[#0a0c10] rounded-md overflow-hidden shadow-2xl border border-border/80 flex items-center justify-center"
+        style={{
+          width: frameDimensions.width > 0 ? `${frameDimensions.width}px` : "auto",
+          height: frameDimensions.height > 0 ? `${frameDimensions.height}px` : "100%",
+          aspectRatio: "9 / 16",
+        }}
+        className="relative max-h-full max-w-full bg-[#0a0c10] rounded-md overflow-hidden shadow-2xl border border-border/80 flex items-center justify-center flex-shrink-0"
       >
         {/* Layer 1: Background Media (Image or Video) */}
         {backgroundVideoUrl ? (

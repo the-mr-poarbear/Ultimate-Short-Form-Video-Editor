@@ -225,6 +225,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             pos_y = getattr(s.visual, "positionY", 50.0) or 50.0
             scale = getattr(s.visual, "scale", 1.0) or 1.0
             zoom = getattr(s.visual, "zoom", 1.0) or 1.0
+            fit = getattr(s.visual, "fit", "cover") or "cover"
             crop_x_pct = getattr(s.visual, "cropX", 0.0) or 0.0
             crop_y_pct = getattr(s.visual, "cropY", 0.0) or 0.0
             transition = getattr(s.visual, "transition", "none") or "none"
@@ -235,15 +236,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             if layout_style == "window":
                 custom_w = getattr(s.visual, "width", None)
                 custom_h = getattr(s.visual, "height", None)
-                if custom_w is not None and custom_h is not None:
+                if custom_w is not None:
                     win_w = max(160, int(1080 * custom_w / 100.0))
-                    win_h = max(90, int(1920 * custom_h / 100.0))
                 else:
                     win_w = max(160, int(1080 * 0.75 * scale))
+
+                if custom_h is not None:
+                    win_h = max(90, int(1920 * custom_h / 100.0))
+                else:
                     if asset.type == "video":
-                        win_h = max(90, int(win_w * 9 / 16))
+                        win_h = max(90, int(1920 * 0.25))
                     else:
-                        win_h = win_w
+                        win_h = max(90, int(1920 * 0.39))
+
                 win_w = (win_w // 2) * 2
                 win_h = (win_h // 2) * 2
 
@@ -256,8 +261,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 overlay_x = 0
                 overlay_y = 0
 
-            # Scaling with force_original_aspect_ratio=increase
-            # For pan transitions, ensure at least 1.25 effective zoom if needed
+            # Scaling with aspect ratio preservation
             if transition in ["pan-right", "pan-left", "pan-down", "pan-up"]:
                 effective_zoom = max(1.25, zoom)
             else:
@@ -284,7 +288,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 x_expr = f"max(0,min(in_w-{win_w},(in_w-{win_w})*{(50.0 + crop_x_pct) / 100.0:.3f}))"
                 y_expr = f"max(0,min(in_h-{win_h},(in_h-{win_h})*{(50.0 + crop_y_pct) / 100.0:.3f}))"
 
-            base_filter = f"scale={z_w}:{z_h}:force_original_aspect_ratio=increase,crop={win_w}:{win_h}:x='{x_expr}':y='{y_expr}',fps=30"
+            if fit == "contain":
+                scale_part = (
+                    f"scale=w='if(gt(a,{win_w}/{win_h}),{z_w},-2)':h='if(gt(a,{win_w}/{win_h}),-2,{z_h})':force_original_aspect_ratio=decrease:force_divisible_by=2,"
+                    f"pad=w='max(iw,{win_w})':h='max(ih,{win_h})':x='(ow-iw)/2':y='(oh-ih)/2':color=0x00000000"
+                )
+            else:
+                scale_part = f"scale={z_w}:{z_h}:force_original_aspect_ratio=increase:force_divisible_by=2"
+
+            base_filter = f"{scale_part},crop={win_w}:{win_h}:x='{x_expr}':y='{y_expr}',fps=30"
 
             if transition == "fade":
                 fade_d = min(0.35, slice_dur / 2.0)
@@ -358,7 +370,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             overlay_cx = int((1080 * pos_x / 100.0) - char_w / 2)
             overlay_cy = int((1920 * pos_y / 100.0) - char_h / 2)
 
-            char_filters = f"scale={char_w}:{char_h}:force_original_aspect_ratio=decrease:force_divisible_by=2"
+            char_filters = (
+                f"scale={char_w}:{char_h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+                f"pad={char_w}:{char_h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+            )
             if getattr(s.character, "flipX", False):
                 char_filters += ",hflip"
             char_filters += f",format=yuva420p,trim=duration={slice_dur:.3f},setpts=PTS-STARTPTS+{eff_c_start:.3f}/TB"
