@@ -20,6 +20,7 @@ export const SliceTrack: React.FC<SliceTrackProps> = ({
   const selectSlice = useEditorStore((s) => s.selectSlice);
   const splitSlice = useEditorStore((s) => s.splitSlice);
   const mergeSlices = useEditorStore((s) => s.mergeSlices);
+  const deleteSlice = useEditorStore((s) => s.deleteSlice);
   const removeVisualFromSlice = useEditorStore((s) => s.removeVisualFromSlice);
 
   const slices = project?.slices || [];
@@ -75,6 +76,7 @@ export const SliceTrack: React.FC<SliceTrackProps> = ({
               }}
               onSplit={(time) => handleSplit(slice.id, time)}
               onMerge={() => handleMerge(slice.id)}
+              onDelete={() => deleteSlice(slice.id)}
               onRemoveVisual={() => removeVisualFromSlice(slice.id)}
             />
           );

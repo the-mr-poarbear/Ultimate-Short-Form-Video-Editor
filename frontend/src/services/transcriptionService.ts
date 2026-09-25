@@ -46,6 +46,21 @@ export const transcriptionService = {
       body: JSON.stringify(slices),
     }),
 
+  deleteSlice: (projectId: string, sliceId: string) =>
+    apiFetch<{ slices: Slice[] }>(`/api/projects/${projectId}/slices/${sliceId}`, {
+      method: "DELETE",
+    }),
+
+  joinTranscriptions: (projectId: string, segmentIds: string[]) =>
+    apiFetch<{ transcript: TranscriptSegment[]; slices: Slice[]; mergedSegment: TranscriptSegment }>(
+      `/api/projects/${projectId}/join-transcriptions`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segmentIds }),
+      }
+    ),
+
   getJobStatus: (jobId: string) =>
     apiFetch<Job>(`/api/jobs/${jobId}`),
 };

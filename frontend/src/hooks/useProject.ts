@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useEditorStore } from "../stores/editorStore";
+import { useCharacterStore } from "../stores/characterStore";
 import { projectService } from "../services/projectService";
 import { audioService } from "../services/audioService";
 import type { Project } from "../types/project";
@@ -16,6 +17,8 @@ export function useProject() {
     setIsLoading(true);
     setError(null);
     try {
+      // Ensure characters are available
+      useCharacterStore.getState().fetchCharacters().catch(() => {});
       const newProj = await projectService.createProject(title || "New Book Bite");
       setProject(newProj, true);
       return newProj;
@@ -31,6 +34,11 @@ export function useProject() {
     setIsLoading(true);
     setError(null);
     try {
+      // Ensure characters are loaded whenever a project is loaded
+      useCharacterStore.getState().fetchCharacters().catch((err) => {
+        console.warn("Could not load characters with project:", err);
+      });
+
       const proj = await projectService.getProject(projectId);
       setProject(proj, true);
 

@@ -154,18 +154,30 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if bgm_files:
                     bgm_path = bgm_files[0]
 
-        # Determine background
-        bg_video_path = None
+        # Determine background media (image or video)
+        bg_media_path = None
+        is_bg_image = False
         if project.backgroundVideo:
             bg_cand = project_dir / "media" / Path(project.backgroundVideo).name
             if bg_cand.exists():
-                bg_video_path = bg_cand
+                bg_media_path = bg_cand
+                bg_asset = next(
+                    (a for a in project.mediaAssets if Path(a.path).name == bg_cand.name or a.url == project.backgroundVideo),
+                    None
+                )
+                if bg_asset:
+                    is_bg_image = (bg_asset.type == "image")
+                else:
+                    is_bg_image = bg_cand.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".bmp"]
 
         input_index = 1
         base_video_tag = "bg"
 
-        if bg_video_path:
-            inputs.extend(["-stream_loop", "-1", "-i", str(bg_video_path)])
+        if bg_media_path:
+            if is_bg_image:
+                inputs.extend(["-loop", "1", "-i", str(bg_media_path)])
+            else:
+                inputs.extend(["-stream_loop", "-1", "-i", str(bg_media_path)])
             filter_graphs.append(
                 f"[{input_index}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,trim=duration={duration:.3f},setpts=PTS-STARTPTS[{base_video_tag}];"
             )
@@ -175,9 +187,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"color=c=0x0d0f12:s=1080x1920:r=30:d={duration:.3f}[{base_video_tag}];"
             )
 
+        # Sort slices chronologically for accurate layering and timing
+        sorted_slices = sorted(project.slices, key=lambda x: x.start)
+
         # Slice visuals
         current_canvas = base_video_tag
-        slices_with_visual = [s for s in project.slices if s.visual and s.visual.assetId]
+        slices_with_visual = [s for s in sorted_slices if s.visual and s.visual.assetId]
 
         if job_id:
             job_service.update_progress(job_id, 25, f"Compositing {len(slices_with_visual)} slice visuals...")
@@ -302,9 +317,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
             current_canvas = next_canvas
 
-        # Slice characters overlay
+        # Slice characters overlay - contiguous timing to prevent pop-out during speech gaps
         slices_with_char = [
-            s for s in project.slices
+            s for s in sorted_slices
             if getattr(s, "character", None) and s.character.characterId and s.character.poseId
         ]
         for c_idx, s in enumerate(slices_with_char):
@@ -324,7 +339,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             input_index += 1
             inputs.extend(["-loop", "1", "-i", str(pose_file)])
 
-            slice_dur = max(s.end - s.start, 0.1)
+            char_s_idx = sorted_slices.index(s)
+            eff_c_start = s.start
+            if char_s_idx < len(sorted_slices) - 1 and getattr(sorted_slices[char_s_idx + 1], "character", None) and sorted_slices[char_s_idx + 1].character.characterId:
+                eff_c_end = sorted_slices[char_s_idx + 1].start
+            else:
+                eff_c_end = s.end
+
+            slice_dur = max(eff_c_end - eff_c_start, 0.1)
             tag_c = f"char_{c_idx}"
             char_w = max(40, int(1080 * (s.character.width or 35.0) / 100.0))
             char_h = max(40, int(1920 * (s.character.height or 40.0) / 100.0))
@@ -336,15 +358,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             overlay_cx = int((1080 * pos_x / 100.0) - char_w / 2)
             overlay_cy = int((1920 * pos_y / 100.0) - char_h / 2)
 
-            char_filters = f"scale={char_w}:{char_h}:force_original_aspect_ratio=contain"
+            char_filters = f"scale={char_w}:{char_h}:force_original_aspect_ratio=decrease:force_divisible_by=2"
             if getattr(s.character, "flipX", False):
                 char_filters += ",hflip"
-            char_filters += f",format=yuva420p,trim=duration={slice_dur:.3f},setpts=PTS-STARTPTS+{s.start:.3f}/TB"
+            char_filters += f",format=yuva420p,trim=duration={slice_dur:.3f},setpts=PTS-STARTPTS+{eff_c_start:.3f}/TB"
 
             filter_graphs.append(f"[{c_input_idx}:v]{char_filters}[{tag_c}];")
             next_char_canvas = f"char_canvas_{c_idx}"
             filter_graphs.append(
-                f"[{current_canvas}][{tag_c}]overlay={overlay_cx}:{overlay_cy}:enable='between(t,{s.start:.3f},{s.end:.3f})':eof_action=pass[{next_char_canvas}];"
+                f"[{current_canvas}][{tag_c}]overlay={overlay_cx}:{overlay_cy}:enable='between(t,{eff_c_start:.3f},{eff_c_end:.3f})':eof_action=pass[{next_char_canvas}];"
             )
             current_canvas = next_char_canvas
 

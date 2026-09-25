@@ -6,6 +6,7 @@ interface CharacterState {
   characters: Character[];
   selectedCharacterId: string | null;
   isLoading: boolean;
+  hasFetched: boolean;
   isCharactersModalOpen: boolean;
 
   setCharactersModalOpen: (open: boolean) => void;
@@ -23,6 +24,7 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
   characters: [],
   selectedCharacterId: null,
   isLoading: false,
+  hasFetched: false,
   isCharactersModalOpen: false,
 
   setCharactersModalOpen: (open) => {
@@ -45,10 +47,11 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
             ? get().selectedCharacterId
             : list[0]?.id || null,
         isLoading: false,
+        hasFetched: true,
       });
     } catch (err) {
       console.error("Failed to fetch characters:", err);
-      set({ isLoading: false });
+      set({ isLoading: false, hasFetched: true });
     }
   },
 
@@ -138,3 +141,8 @@ export const useCharacterStore = create<CharacterState>((set, get) => ({
     }
   },
 }));
+
+// Automatically fetch characters on startup
+if (typeof window !== "undefined") {
+  useCharacterStore.getState().fetchCharacters().catch(() => {});
+}

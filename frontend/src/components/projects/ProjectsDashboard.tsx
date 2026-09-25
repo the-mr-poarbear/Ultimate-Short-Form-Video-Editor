@@ -62,6 +62,7 @@ export const ProjectsDashboard: React.FC<ProjectsDashboardProps> = ({
 
   useEffect(() => {
     fetchProjects();
+    useCharacterStore.getState().fetchCharacters().catch(() => {});
   }, []);
 
   const handleDuplicate = async (id: string) => {

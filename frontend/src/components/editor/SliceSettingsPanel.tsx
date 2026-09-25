@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useEditorStore } from "../../stores/editorStore";
 import { useCharacterStore } from "../../stores/characterStore";
 import { getMediaUrl } from "../../services/api";
 import { Slider } from "../ui/Slider";
 import { Button } from "../ui/Button";
+import { formatTime } from "../../lib/formatting";
 import type { VisualTransition, SliceLayoutStyle } from "../../types/project";
 import {
   Layers,
@@ -27,6 +28,8 @@ import {
   Plus,
   Check,
   Settings,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 const TRANSITIONS: { value: VisualTransition; label: string; desc: string }[] = [
@@ -40,35 +43,86 @@ const TRANSITIONS: { value: VisualTransition; label: string; desc: string }[] = 
   { value: "zoom-out", label: "Zoom Out", desc: "Ken Burns slow pull out" },
 ];
 
+const videoDurationCache = new Map<string, number>();
+
 export const SliceSettingsPanel: React.FC = () => {
   const project = useEditorStore((s) => s.project);
   const currentTime = useEditorStore((s) => s.currentTime);
   const selectedSliceId = useEditorStore((s) => s.selectedSliceId);
+  const selectSlice = useEditorStore((s) => s.selectSlice);
+  const setCurrentTime = useEditorStore((s) => s.setCurrentTime);
   const updateSliceVisual = useEditorStore((s) => s.updateSliceVisual);
   const assignVisualToSlice = useEditorStore((s) => s.assignVisualToSlice);
 
   const assignCharacterToSlice = useEditorStore((s) => s.assignCharacterToSlice);
   const removeCharacterFromSlice = useEditorStore((s) => s.removeCharacterFromSlice);
   const updateSliceCharacter = useEditorStore((s) => s.updateSliceCharacter);
+  const deleteSlice = useEditorStore((s) => s.deleteSlice);
 
   const characters = useCharacterStore((s) => s.characters);
   const setCharactersModalOpen = useCharacterStore((s) => s.setCharactersModalOpen);
-
   const [activeTab, setActiveTab] = useState<"visual" | "character">("visual");
+
+  useEffect(() => {
+    if (characters.length === 0) {
+      useCharacterStore.getState().fetchCharacters().catch(() => {});
+    }
+  }, [characters.length]);
 
   if (!project) return null;
 
-  // Resolve active or selected slice (synced with preview viewer)
-  const currentPlayheadSlice = project.slices.find(
-    (s, idx, arr) =>
-      currentTime >= s.start &&
-      (currentTime < s.end || (idx === arr.length - 1 && currentTime <= s.end))
-  );
+  if (project.slices.length === 0) {
+    return (
+      <div className="p-6 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-2 h-40">
+        <Layers className="w-8 h-8 opacity-40 text-primary" />
+        <p className="font-semibold text-foreground">No slices in this project.</p>
+        <p className="text-[10px]">Create slices using the Slice Tool in the transcript panel.</p>
+      </div>
+    );
+  }
 
-  const activeSlice =
-    currentPlayheadSlice ||
-    (selectedSliceId ? project.slices.find((s) => s.id === selectedSliceId) : null) ||
-    project.slices[0];
+  // Prioritize specifically selected slice first, then current playhead slice, then first slice
+  const selectedSlice = selectedSliceId
+    ? project.slices.find((s) => s.id === selectedSliceId)
+    : null;
+
+  const sortedSlices = React.useMemo(() => {
+    return [...project.slices].sort((a, b) => a.start - b.start);
+  }, [project.slices]);
+
+  const currentPlayheadSlice = React.useMemo(() => {
+    if (!sortedSlices || sortedSlices.length === 0) return null;
+    if (currentTime < sortedSlices[0].start) return sortedSlices[0];
+    for (let i = 0; i < sortedSlices.length; i++) {
+      const slice = sortedSlices[i];
+      const nextSlice = sortedSlices[i + 1];
+      const sliceBoundaryEnd = nextSlice
+        ? nextSlice.start
+        : Math.max(slice.end, project.duration || slice.end);
+      if (currentTime >= slice.start && currentTime < sliceBoundaryEnd) {
+        return slice;
+      }
+    }
+    return sortedSlices[sortedSlices.length - 1];
+  }, [sortedSlices, currentTime, project.duration]);
+
+  const activeSlice = selectedSlice || currentPlayheadSlice || sortedSlices[0];
+  const activeIndex = activeSlice ? project.slices.findIndex((s) => s.id === activeSlice.id) : -1;
+
+  const handleDeleteSlice = () => {
+    if (!activeSlice) return;
+    const currentIdx = activeIndex;
+    const remaining = project.slices.filter((s) => s.id !== activeSlice.id);
+    deleteSlice(activeSlice.id);
+
+    if (remaining.length > 0) {
+      const nextTarget = remaining[Math.min(currentIdx, remaining.length - 1)];
+      selectSlice(nextTarget.id);
+      setCurrentTime(nextTarget.start);
+    } else {
+      selectSlice(null);
+    }
+  };
 
   if (!activeSlice) {
     return (
@@ -115,19 +169,204 @@ export const SliceSettingsPanel: React.FC = () => {
   const transition = visual?.transition ?? "none";
   const isPan = transition.startsWith("pan-");
 
+  // Determine source video duration across all lengths
+  const [loadedVideoDuration, setLoadedVideoDuration] = useState<number | null>(() => {
+    if (assignedAsset?.id && videoDurationCache.has(assignedAsset.id)) {
+      return videoDurationCache.get(assignedAsset.id)!;
+    }
+    return assignedAsset?.duration ?? null;
+  });
+
+  useEffect(() => {
+    if (!assignedAsset || assignedAsset.type !== "video") {
+      setLoadedVideoDuration(null);
+      return;
+    }
+
+    if (assignedAsset.duration && assignedAsset.duration > 0) {
+      videoDurationCache.set(assignedAsset.id, assignedAsset.duration);
+      setLoadedVideoDuration(assignedAsset.duration);
+      return;
+    }
+
+    if (videoDurationCache.has(assignedAsset.id)) {
+      const cached = videoDurationCache.get(assignedAsset.id)!;
+      setLoadedVideoDuration(cached);
+      return;
+    }
+
+    let isMounted = true;
+    const vid = document.createElement("video");
+    vid.preload = "metadata";
+    vid.src = getMediaUrl(assignedAsset.url);
+
+    const onLoadedMetadata = () => {
+      if (isMounted && vid.duration && isFinite(vid.duration) && vid.duration > 0) {
+        videoDurationCache.set(assignedAsset.id, vid.duration);
+        setLoadedVideoDuration(vid.duration);
+        useEditorStore.getState().updateMediaAssetDuration(assignedAsset.id, vid.duration);
+      }
+    };
+
+    vid.addEventListener("loadedmetadata", onLoadedMetadata);
+
+    return () => {
+      isMounted = false;
+      vid.removeEventListener("loadedmetadata", onLoadedMetadata);
+    };
+  }, [assignedAsset?.id, assignedAsset?.url, assignedAsset?.duration]);
+
+  const effectiveVideoDuration =
+    assignedAsset?.duration && assignedAsset.duration > 0
+      ? assignedAsset.duration
+      : (assignedAsset?.id && videoDurationCache.get(assignedAsset.id)) || loadedVideoDuration;
+
+  const sliderMax = Math.max(
+    mediaStart,
+    effectiveVideoDuration && effectiveVideoDuration > 0
+      ? Math.round(effectiveVideoDuration * 10) / 10
+      : 60
+  );
+
+  const throttleSliderTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingOffsetRef = React.useRef<number | null>(null);
+
+  const handleSliderChange = React.useCallback(
+    (val: number) => {
+      const clamped = Math.min(sliderMax, Math.max(0, val));
+      pendingOffsetRef.current = clamped;
+
+      if (!throttleSliderTimerRef.current) {
+        patchVisual({ mediaStart: clamped });
+        throttleSliderTimerRef.current = setTimeout(() => {
+          throttleSliderTimerRef.current = null;
+          if (pendingOffsetRef.current !== null) {
+            patchVisual({ mediaStart: pendingOffsetRef.current });
+          }
+        }, 40);
+      }
+    },
+    [sliderMax, patchVisual]
+  );
+
+  React.useEffect(() => {
+    return () => {
+      if (throttleSliderTimerRef.current) clearTimeout(throttleSliderTimerRef.current);
+    };
+  }, []);
+
+  const formatButtonLabel = (t: number) => {
+    if (t === 0) return "0s";
+    if (t < 60) return `${Math.round(t)}s`;
+    const m = Math.floor(t / 60);
+    const s = Math.round(t % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
+  const quickJumpPoints = React.useMemo(() => {
+    if (sliderMax <= 30) {
+      const raw = [0, 5, 10, 15, 20, Math.floor(sliderMax)];
+      return Array.from(new Set(raw.filter((t) => t <= sliderMax))).sort((a, b) => a - b);
+    }
+    const points = [
+      0,
+      Math.round(sliderMax * 0.25 * 10) / 10,
+      Math.round(sliderMax * 0.5 * 10) / 10,
+      Math.round(sliderMax * 0.75 * 10) / 10,
+      Math.round(sliderMax * 10) / 10,
+    ];
+    return Array.from(new Set(points)).sort((a, b) => a - b);
+  }, [sliderMax]);
+
   return (
-    <div className="flex flex-col gap-4 text-xs select-none pb-6">
-      {/* Slice Info & Asset Header */}
-      <div className="p-2.5 rounded-lg bg-surface-elevated/60 border border-border/80 flex flex-col gap-1.5">
+    <div className="flex flex-col gap-3.5 text-xs select-none pb-6">
+      {/* Target Slice Switcher & Direct Delete Toolbar */}
+      <div className="p-2.5 rounded-lg bg-surface-elevated/90 border border-border/80 flex flex-col gap-2 shadow-xs">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 font-semibold text-foreground">
+          <div className="flex items-center gap-1.5 font-bold text-foreground text-xs">
             <Layers className="w-3.5 h-3.5 text-primary" />
-            <span>Slice Settings</span>
+            <span>Target Slice</span>
           </div>
-          <span className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-surface">
-            {activeSlice.start.toFixed(1)}s - {activeSlice.end.toFixed(1)}s ({(activeSlice.end - activeSlice.start).toFixed(1)}s)
-          </span>
+          <button
+            type="button"
+            onClick={handleDeleteSlice}
+            title={`Delete SLICE ${activeIndex + 1}`}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-danger/15 hover:bg-danger text-danger hover:text-white border border-danger/30 text-xs font-bold transition-all shadow-xs cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete Slice</span>
+          </button>
         </div>
+
+        {/* Dropdown & Prev/Next Arrows */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            disabled={activeIndex <= 0}
+            onClick={() => {
+              if (activeIndex > 0) {
+                const prev = project.slices[activeIndex - 1];
+                selectSlice(prev.id);
+                setCurrentTime(prev.start);
+              }
+            }}
+            title="Previous slice"
+            className="p-1.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none cursor-pointer border border-border/50"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+
+          <select
+            value={activeSlice.id}
+            onChange={(e) => {
+              const chosen = project.slices.find((s) => s.id === e.target.value);
+              if (chosen) {
+                selectSlice(chosen.id);
+                setCurrentTime(chosen.start);
+              }
+            }}
+            className="bg-surface font-mono text-[11px] font-semibold text-foreground rounded px-2 py-1.5 border border-border/80 focus:outline-none focus:ring-1 focus:ring-primary flex-1 min-w-0 cursor-pointer truncate"
+          >
+            {project.slices.map((s, idx) => (
+              <option key={s.id} value={s.id}>
+                SLICE {String(idx + 1).padStart(2, "0")} ({s.start.toFixed(1)}s - {s.end.toFixed(1)}s)
+                {s.text ? ` - "${s.text.slice(0, 18)}..."` : ""}
+              </option>
+            ))}
+          </select>
+
+          <button
+            type="button"
+            disabled={activeIndex >= project.slices.length - 1}
+            onClick={() => {
+              if (activeIndex < project.slices.length - 1) {
+                const next = project.slices[activeIndex + 1];
+                selectSlice(next.id);
+                setCurrentTime(next.start);
+              }
+            }}
+            title="Next slice"
+            className="p-1.5 rounded hover:bg-surface-hover text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:pointer-events-none cursor-pointer border border-border/50"
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {/* Slice Timing and Text summary */}
+        <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground pt-1 border-t border-border/40">
+          <span>
+            {activeSlice.start.toFixed(2)}s → {activeSlice.end.toFixed(2)}s ({(activeSlice.end - activeSlice.start).toFixed(2)}s)
+          </span>
+          {activeSlice.text && (
+            <span className="truncate max-w-[130px] text-foreground/80 font-sans italic" title={activeSlice.text}>
+              "{activeSlice.text}"
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Asset Header */}
+      <div className="p-2.5 rounded-lg bg-surface-elevated/60 border border-border/80 flex flex-col gap-1.5">
 
         {assignedAsset ? (
           <div className="flex items-center gap-2 mt-1 text-[11px] text-foreground/90">
@@ -507,37 +746,73 @@ export const SliceSettingsPanel: React.FC = () => {
                   <span>Video Clip Start Offset</span>
                 </span>
                 <span className="font-mono text-xs text-indigo-400 font-bold">
-                  {mediaStart.toFixed(2)}s
+                  {formatTime(mediaStart, true)}
+                  {sliderMax > 0 && (
+                    <span className="text-[10px] text-muted-foreground font-normal ml-1">
+                      / {formatTime(sliderMax, false)}
+                    </span>
+                  )}
                 </span>
               </div>
 
               <p className="text-[10px] text-muted-foreground">
-                Set which second of the source video this slice starts playing from.
+                Set which second of the source video this slice starts playing from (covers entire video duration).
               </p>
 
               <Slider
                 label="Start Offset (In-Point)"
                 value={Math.round(mediaStart * 10) / 10}
                 min={0}
-                max={60}
-                step={0.5}
+                max={sliderMax}
+                step={sliderMax > 300 ? 1 : 0.5}
                 unit="s"
-                onChange={(val) => patchVisual({ mediaStart: val })}
+                valueDisplay={
+                  mediaStart >= 60
+                    ? `${formatButtonLabel(mediaStart)} (${mediaStart.toFixed(1)}s)`
+                    : `${mediaStart.toFixed(1)}s`
+                }
+                onChange={handleSliderChange}
               />
 
+              {/* Length indicator & Direct Second Input */}
+              <div className="flex items-center justify-between gap-2 pt-0.5">
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {sliderMax > 0 ? `Total: ${formatTime(sliderMax, false)} (${sliderMax.toFixed(1)}s)` : "Detecting length..."}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground font-medium">Sec:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={sliderMax}
+                    step={0.1}
+                    value={Math.round(mediaStart * 10) / 10}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      if (!isNaN(val)) {
+                        patchVisual({ mediaStart: Math.max(0, Math.min(sliderMax, Math.round(val * 100) / 100)) });
+                      }
+                    }}
+                    className="w-16 bg-surface px-1.5 py-0.5 rounded border border-border/80 text-[11px] font-mono text-foreground text-right focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  />
+                </div>
+              </div>
+
+              {/* Quick Jump Milestones across entire video */}
               <div className="flex items-center gap-1.5">
-                {[0, 2, 5, 10, 15, 20].map((t) => (
+                {quickJumpPoints.map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => patchVisual({ mediaStart: t })}
+                    title={`Jump to ${formatTime(t, true)} (${t.toFixed(1)}s)`}
                     className={`flex-1 py-1 rounded text-[10px] font-mono cursor-pointer transition-colors ${
-                      Math.abs(mediaStart - t) < 0.2
+                      Math.abs(mediaStart - t) < 0.3
                         ? "bg-indigo-500 text-white font-bold"
-                        : "bg-surface hover:bg-surface-hover text-muted-foreground hover:text-foreground"
+                        : "bg-surface hover:bg-surface-hover text-muted-foreground hover:text-foreground border border-border/50"
                     }`}
                   >
-                    {t}s
+                    {formatButtonLabel(t)}
                   </button>
                 ))}
               </div>
@@ -981,6 +1256,18 @@ export const SliceSettingsPanel: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* Delete Slice Action */}
+      <div className="pt-2 border-t border-border/40 mt-1">
+        <button
+          type="button"
+          onClick={handleDeleteSlice}
+          className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-md bg-danger/10 hover:bg-danger/20 text-danger border border-danger/30 text-xs font-semibold transition-colors cursor-pointer"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          <span>Delete This Slice</span>
+        </button>
+      </div>
     </div>
   );
 };

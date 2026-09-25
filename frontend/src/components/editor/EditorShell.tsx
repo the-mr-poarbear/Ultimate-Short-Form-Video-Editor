@@ -52,6 +52,11 @@ export const EditorShell: React.FC = () => {
 
   const { isTranscribing, jobProgress, error: transcribeError, runTranscription } = useTranscription();
 
+  // Ensure global characters are loaded in editor
+  useEffect(() => {
+    useCharacterStore.getState().fetchCharacters().catch(() => {});
+  }, []);
+
   // Synchronize Background Music with audioPlayer when project or BGM changes
   useEffect(() => {
     if (project?.backgroundMusic?.url) {

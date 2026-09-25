@@ -48,6 +48,43 @@ def extract_media_metadata(file_path: Path, is_video: bool):
 
     return width, height, duration
 
+def generate_video_thumbnail(file_path: Path, output_path: Path, duration: float = None) -> bool:
+    """
+    Generate thumbnail for video at midpoint or somewhere in between to avoid black screen at video start.
+    """
+    candidates = []
+    if duration and duration > 0:
+        # Seek somewhere in between start and end (midpoint)
+        midpoint = duration / 2.0
+        candidates.append(midpoint)
+        if duration > 4.0:
+            candidates.append(min(duration * 0.25, 5.0))
+        if duration > 1.5:
+            candidates.append(1.0)
+    else:
+        candidates.extend([2.0, 1.5, 1.0])
+
+    # Fallbacks in case earlier seeks fail
+    candidates.extend([0.5, 0.1, 0.0])
+
+    for ss in candidates:
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{ss:.3f}",
+            "-i", str(file_path),
+            "-vframes", "1",
+            "-vf", "scale=360:-1",
+            str(output_path)
+        ]
+        try:
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if res.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+                return True
+        except Exception:
+            continue
+
+    return False
+
 @router.post("/media")
 async def upload_media(project_id: str, file: UploadFile = File(...)):
     proj = project_service.get_project(project_id)
@@ -75,24 +112,13 @@ async def upload_media(project_id: str, file: UploadFile = File(...)):
 
     width, height, duration = extract_media_metadata(dest_path, is_video)
 
-    # Generate thumbnail if video
+    # Generate thumbnail if video (taken from somewhere in between to avoid black screen at start)
     thumb_url = None
     if is_video:
         thumb_name = f"{asset_id}_thumb.jpg"
         thumb_path = media_dir / thumb_name
-        thumb_cmd = [
-            "ffmpeg", "-y",
-            "-ss", "00:00:00.5",
-            "-i", str(dest_path),
-            "-vframes", "1",
-            "-vf", "scale=360:-1",
-            str(thumb_path)
-        ]
-        try:
-            subprocess.run(thumb_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        if generate_video_thumbnail(dest_path, thumb_path, duration):
             thumb_url = f"/media/{project_id}/media/{thumb_name}"
-        except Exception:
-            pass
 
     asset = MediaAsset(
         id=asset_id,
@@ -116,6 +142,39 @@ def list_assets(project_id: str):
     proj = project_service.get_project(project_id)
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Ensure all video assets have valid thumbnails from in-between frame
+    modified = False
+    media_dir = project_service.get_project_dir(project_id) / "media"
+    for a in proj.mediaAssets:
+        if a.type == "video":
+            video_path = Path(a.path)
+            if (not a.duration or a.duration <= 0) and video_path.exists():
+                w, h, dur = extract_media_metadata(video_path, True)
+                if dur:
+                    a.duration = dur
+                    modified = True
+                if w and not a.width:
+                    a.width = w
+                    modified = True
+                if h and not a.height:
+                    a.height = h
+                    modified = True
+
+            thumb_name = f"{a.id}_thumb.jpg"
+            thumb_path = media_dir / thumb_name
+            if not thumb_path.exists() or thumb_path.stat().st_size == 0:
+                if video_path.exists():
+                    if generate_video_thumbnail(video_path, thumb_path, a.duration):
+                        a.thumbnailUrl = f"/media/{project_id}/media/{thumb_name}"
+                        modified = True
+            elif not a.thumbnailUrl or a.thumbnailUrl != f"/media/{project_id}/media/{thumb_name}":
+                a.thumbnailUrl = f"/media/{project_id}/media/{thumb_name}"
+                modified = True
+
+    if modified:
+        project_service.save_project(proj)
+
     return {"assets": proj.mediaAssets}
 
 @router.delete("/media/{asset_id}")
@@ -135,13 +194,24 @@ def delete_asset(project_id: str, asset_id: str):
         if s.visual and s.visual.assetId == asset_id:
             s.visual = None
 
+    # Clear background if this asset was set as background media
+    if proj.backgroundVideo and (
+        asset.url in proj.backgroundVideo
+        or asset.name in proj.backgroundVideo
+        or Path(asset.path).name in proj.backgroundVideo
+    ):
+        proj.backgroundVideo = None
+
     project_service.save_project(proj)
 
-    # Attempt to remove file
+    # Attempt to remove file and its thumbnail
     try:
         p = Path(asset.path)
         if p.exists():
             p.unlink()
+        thumb_p = p.parent / f"{asset.id}_thumb.jpg"
+        if thumb_p.exists():
+            thumb_p.unlink()
     except Exception:
         pass
 

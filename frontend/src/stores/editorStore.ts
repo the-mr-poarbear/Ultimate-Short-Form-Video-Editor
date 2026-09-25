@@ -27,6 +27,9 @@ interface EditorState {
 
   undo: () => void;
   redo: () => void;
+  beginBatch: () => void;
+  endBatch: () => void;
+  cancelBatch: () => void;
   saveProject: () => Promise<void>;
   markSaved: () => void;
 
@@ -44,6 +47,7 @@ interface EditorState {
 
   addMediaAsset: (asset: MediaAsset) => void;
   removeMediaAsset: (assetId: string) => void;
+  updateMediaAssetDuration: (assetId: string, duration: number) => void;
   assignVisualToSlice: (sliceId: string, assetId: string, type: "image" | "video") => void;
   removeVisualFromSlice: (sliceId: string) => void;
   updateSliceVisual: (sliceId: string, visualPatch: Partial<SliceVisual>) => void;
@@ -64,6 +68,9 @@ interface EditorState {
   splitSlice: (sliceId: string, time: number) => void;
   splitSliceAtTime: (splitTime: number) => void;
   mergeSlices: (firstId: string, secondId: string) => void;
+  deleteSlice: (sliceId: string) => void;
+  canJoinTranscriptions: (segmentIds: string[]) => { canJoin: boolean; reason?: string };
+  joinTranscriptions: (segmentIds: string[]) => { success: boolean; error?: string };
 
   isCaptionSettingsOpen: boolean;
   setCaptionSettingsOpen: (open: boolean) => void;
@@ -79,6 +86,7 @@ interface EditorState {
 
 const cloneProject = (p: Project): Project => JSON.parse(JSON.stringify(p));
 const MAX_HISTORY = 50;
+let batchSnapshot: Project | null = null;
 let lastSettingsSnapshotTime = 0;
 
 function pushHistory(
@@ -87,6 +95,12 @@ function pushHistory(
 ): { past: Project[]; future: Project[]; isDirty: boolean } {
   if (!state.project) {
     return { past: state.past, future: state.future, isDirty: state.isDirty };
+  }
+
+  // If in an active batch (e.g. continuous dragging, resizing, or slider scrub):
+  // do not record intermediate history steps! The start-state is preserved in batchSnapshot.
+  if (batchSnapshot !== null) {
+    return { past: state.past, future: [], isDirty: true };
   }
 
   const now = Date.now();
@@ -129,7 +143,46 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   lastSavedAt: null,
   saveError: null,
 
+  beginBatch: () => {
+    const { project } = get();
+    if (!project) return;
+    if (batchSnapshot === null) {
+      batchSnapshot = cloneProject(project);
+    }
+  },
+
+  endBatch: () => {
+    if (batchSnapshot === null) return;
+    const { project, past } = get();
+    const snapshot = batchSnapshot;
+    batchSnapshot = null;
+
+    if (!project) return;
+
+    // Only commit to history if the project was actually modified during the gesture
+    if (JSON.stringify(snapshot) === JSON.stringify(project)) {
+      return;
+    }
+
+    const newPast = [...past, snapshot].slice(-MAX_HISTORY);
+    set({
+      past: newPast,
+      future: [],
+      isDirty: true,
+    });
+  },
+
+  cancelBatch: () => {
+    if (batchSnapshot === null) return;
+    const snapshot = batchSnapshot;
+    batchSnapshot = null;
+    set({
+      project: snapshot,
+    });
+  },
+
   undo: () => {
+    batchSnapshot = null;
     const { past, future, project } = get();
     if (past.length === 0 || !project) return;
     const previous = past[past.length - 1];
@@ -144,6 +197,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   redo: () => {
+    batchSnapshot = null;
     const { past, future, project } = get();
     if (future.length === 0 || !project) return;
     const next = future[0];
@@ -185,7 +239,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSliceMode: (active) => set({ isSliceMode: active }),
   setSliceSettingsOpen: (open) => set({ isSliceSettingsOpen: open }),
 
-  setProject: (project, clearHistory = false) =>
+  setProject: (project, clearHistory = false) => {
+    batchSnapshot = null;
     set((state) => {
       const isNewProj = !state.project || (project && project.id !== state.project.id);
       return {
@@ -196,7 +251,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         isDirty: clearHistory || isNewProj ? false : state.isDirty,
         lastSavedAt: clearHistory || isNewProj ? new Date() : state.lastSavedAt,
       };
-    }),
+    });
+  },
 
   updateProjectTitle: (title) =>
     set((state) => {
@@ -256,14 +312,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   removeMediaAsset: (assetId) =>
     set((state) => {
       if (!state.project) return state;
+      const targetAsset = state.project.mediaAssets.find((a) => a.id === assetId);
+      const isBg = targetAsset && state.project.backgroundVideo === targetAsset.url;
       const hist = pushHistory(state);
       return {
         ...hist,
         project: {
           ...state.project,
+          backgroundVideo: isBg ? undefined : state.project.backgroundVideo,
           mediaAssets: state.project.mediaAssets.filter((a) => a.id !== assetId),
           slices: state.project.slices.map((s) =>
             s.visual?.assetId === assetId ? { ...s, visual: undefined } : s
+          ),
+        },
+      };
+    }),
+
+  updateMediaAssetDuration: (assetId, duration) =>
+    set((state) => {
+      if (!state.project) return state;
+      return {
+        project: {
+          ...state.project,
+          mediaAssets: state.project.mediaAssets.map((a) =>
+            a.id === assetId ? { ...a, duration } : a
           ),
         },
       };
@@ -312,7 +384,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateSliceVisual: (sliceId, visualPatch) =>
     set((state) => {
       if (!state.project) return state;
-      const hist = pushHistory(state);
+      const hist = pushHistory(state, true);
       return {
         ...hist,
         project: {
@@ -379,7 +451,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   updateSliceCharacter: (sliceId, patch) =>
     set((state) => {
       if (!state.project) return state;
-      const hist = pushHistory(state);
+      const hist = pushHistory(state, true);
       return {
         ...hist,
         project: {
@@ -662,6 +734,174 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         },
       };
     }),
+
+  deleteSlice: (sliceId) =>
+    set((state) => {
+      if (!state.project) return state;
+      const hist = pushHistory(state);
+      const newSlices = state.project.slices.filter((s) => s.id !== sliceId);
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          slices: newSlices,
+        },
+        selectedSliceId: state.selectedSliceId === sliceId ? null : state.selectedSliceId,
+      };
+    }),
+
+  canJoinTranscriptions: (segmentIds) => {
+    const state = get();
+    if (!state.project) return { canJoin: false, reason: "No active project" };
+    const targetSegments = state.project.transcript
+      .filter((s) => segmentIds.includes(s.id))
+      .sort((a, b) => a.start - b.start);
+
+    if (targetSegments.length < 2) {
+      return { canJoin: false, reason: "Select at least 2 transcript segments to join." };
+    }
+
+    const firstSeg = targetSegments[0];
+    const lastSeg = targetSegments[targetSegments.length - 1];
+    const joinStart = firstSeg.start;
+    const joinEnd = lastSeg.end;
+
+    // Associated slices
+    const assocSlices = state.project.slices
+      .filter((s) => s.start < joinEnd - 0.05 && s.end > joinStart + 0.05)
+      .sort((a, b) => a.start - b.start);
+
+    if (assocSlices.length > 1) {
+      const otherSlices = assocSlices.slice(1);
+      const nonEmptySlices = otherSlices.filter((s) => {
+        const hasVisual = Boolean(s.visual && s.visual.assetId);
+        const hasChar = Boolean(s.character && s.character.characterId);
+        return hasVisual || hasChar;
+      });
+
+      if (nonEmptySlices.length > 0) {
+        return {
+          canJoin: false,
+          reason: `Every slice of those transcriptions except the first one must be empty. Slice "${nonEmptySlices[0].id}" has media or character assigned.`,
+        };
+      }
+    }
+
+    return { canJoin: true };
+  },
+
+  joinTranscriptions: (segmentIds) => {
+    let outcome: { success: boolean; error?: string } = { success: false };
+    set((state) => {
+      if (!state.project) {
+        outcome = { success: false, error: "No active project" };
+        return state;
+      }
+      const targetSegments = state.project.transcript
+        .filter((s) => segmentIds.includes(s.id))
+        .sort((a, b) => a.start - b.start);
+
+      if (targetSegments.length < 2) {
+        outcome = { success: false, error: "Select at least 2 transcript segments to join." };
+        return state;
+      }
+
+      const firstSeg = targetSegments[0];
+      const lastSeg = targetSegments[targetSegments.length - 1];
+      const joinStart = firstSeg.start;
+      const joinEnd = lastSeg.end;
+
+      const assocSlices = state.project.slices
+        .filter((s) => s.start < joinEnd - 0.05 && s.end > joinStart + 0.05)
+        .sort((a, b) => a.start - b.start);
+
+      // Check condition: Every slice of those transcriptions except the first one MUST be empty!
+      if (assocSlices.length > 1) {
+        const otherSlices = assocSlices.slice(1);
+        const nonEmptySlices = otherSlices.filter((s) => {
+          const hasVisual = Boolean(s.visual && s.visual.assetId);
+          const hasChar = Boolean(s.character && s.character.characterId);
+          return hasVisual || hasChar;
+        });
+
+        if (nonEmptySlices.length > 0) {
+          outcome = {
+            success: false,
+            error: `Every slice of those transcriptions except the first one must be empty. Slice "${nonEmptySlices[0].id}" has media or a character assigned. Please remove its content or delete the slice first.`,
+          };
+          return state;
+        }
+      }
+
+      const hist = pushHistory(state);
+
+      // 1. Merge transcript segments
+      const allWords = targetSegments.flatMap((s) => s.words || []);
+      const mergedText = targetSegments.map((s) => s.text).join(" ").trim();
+      const mergedSegment: import("../types/transcript").TranscriptSegment = {
+        id: firstSeg.id,
+        start: joinStart,
+        end: joinEnd,
+        text: mergedText,
+        words: allWords,
+      };
+
+      const newTranscript: import("../types/transcript").TranscriptSegment[] = [];
+      let inserted = false;
+      for (const seg of state.project.transcript) {
+        if (segmentIds.includes(seg.id)) {
+          if (!inserted) {
+            newTranscript.push(mergedSegment);
+            inserted = true;
+          }
+        } else {
+          newTranscript.push(seg);
+        }
+      }
+
+      // 2. Slices: All occupy one slice
+      let newSlices: Slice[];
+      let targetSliceId = "";
+
+      if (assocSlices.length > 0) {
+        const firstSlice = assocSlices[0];
+        targetSliceId = firstSlice.id;
+        const mergedSlice: Slice = {
+          ...firstSlice,
+          start: Math.min(firstSlice.start, joinStart),
+          end: Math.max(firstSlice.end, joinEnd, ...assocSlices.map((s) => s.end)),
+          text: mergedText,
+        };
+
+        const otherSliceIds = new Set(assocSlices.slice(1).map((s) => s.id));
+        newSlices = state.project.slices
+          .filter((s) => !otherSliceIds.has(s.id))
+          .map((s) => (s.id === firstSlice.id ? mergedSlice : s));
+      } else {
+        const newSlice: Slice = {
+          id: `slice-${Date.now()}`,
+          start: joinStart,
+          end: joinEnd,
+          text: mergedText,
+        };
+        targetSliceId = newSlice.id;
+        newSlices = [...state.project.slices, newSlice].sort((a, b) => a.start - b.start);
+      }
+
+      outcome = { success: true };
+
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          transcript: newTranscript,
+          slices: newSlices,
+        },
+        selectedSliceId: targetSliceId || state.selectedSliceId,
+      };
+    });
+    return outcome;
+  },
 
   setActiveJob: (activeJob) => set({ activeJob }),
 }));

@@ -2,7 +2,7 @@ import React from "react";
 import type { TranscriptSegment as SegmentType } from "../../types/transcript";
 import { TranscriptWord } from "./TranscriptWord";
 import { formatTime } from "../../lib/formatting";
-import { Play } from "lucide-react";
+import { Play, Merge, CheckSquare, Square, AlertCircle } from "lucide-react";
 
 interface TranscriptSegmentProps {
   segment: SegmentType;
@@ -10,6 +10,12 @@ interface TranscriptSegmentProps {
   isSliceMode?: boolean;
   onSeek: (time: number) => void;
   onSliceWord?: (time: number) => void;
+  onJoinWithNext?: () => void;
+  canJoinWithNext?: boolean;
+  joinDisabledReason?: string;
+  isSelectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 }
 
 export const TranscriptSegment: React.FC<TranscriptSegmentProps> = ({
@@ -18,6 +24,12 @@ export const TranscriptSegment: React.FC<TranscriptSegmentProps> = ({
   isSliceMode = false,
   onSeek,
   onSliceWord,
+  onJoinWithNext,
+  canJoinWithNext = true,
+  joinDisabledReason,
+  isSelectMode = false,
+  isSelected = false,
+  onToggleSelect,
 }) => {
   const isSegmentActive =
     currentTime >= segment.start && currentTime < segment.end;
@@ -25,23 +37,72 @@ export const TranscriptSegment: React.FC<TranscriptSegmentProps> = ({
   return (
     <div
       className={`p-2.5 rounded-lg border transition-all ${
-        isSegmentActive
+        isSelected
+          ? "bg-primary/10 border-primary ring-1 ring-primary/40"
+          : isSegmentActive
           ? "bg-surface-elevated border-primary/40 ring-1 ring-primary/20"
           : "bg-surface border-border/40 hover:border-border"
       }`}
     >
       <div className="flex items-center justify-between pb-1 mb-1 border-b border-border/30 text-[10px]">
-        <button
-          type="button"
-          onClick={() => onSeek(segment.start)}
-          className="flex items-center gap-1 font-mono text-muted-foreground hover:text-primary transition-colors cursor-pointer"
-        >
-          <Play className="w-2.5 h-2.5 fill-current" />
-          <span>{formatTime(segment.start)}</span>
-          <span>→</span>
-          <span>{formatTime(segment.end)}</span>
-        </button>
-        <span className="font-mono text-muted-foreground/60">{segment.id}</span>
+        <div className="flex items-center gap-1.5">
+          {isSelectMode && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleSelect?.();
+              }}
+              className="text-primary hover:text-primary/80 cursor-pointer"
+            >
+              {isSelected ? (
+                <CheckSquare className="w-3.5 h-3.5 text-primary" />
+              ) : (
+                <Square className="w-3.5 h-3.5 text-muted-foreground/60" />
+              )}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onSeek(segment.start)}
+            className="flex items-center gap-1 font-mono text-muted-foreground hover:text-primary transition-colors cursor-pointer"
+          >
+            <Play className="w-2.5 h-2.5 fill-current" />
+            <span>{formatTime(segment.start)}</span>
+            <span>→</span>
+            <span>{formatTime(segment.end)}</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {onJoinWithNext && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onJoinWithNext();
+              }}
+              title={
+                canJoinWithNext
+                  ? "Join with next transcription segment (all occupy 1 slice)"
+                  : joinDisabledReason || "Every slice except the first one must be empty"
+              }
+              className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono transition-all cursor-pointer ${
+                canJoinWithNext
+                  ? "bg-primary/15 hover:bg-primary/25 text-primary border border-primary/30"
+                  : "bg-warning/10 hover:bg-warning/20 text-warning border border-warning/30"
+              }`}
+            >
+              {canJoinWithNext ? (
+                <Merge className="w-2.5 h-2.5" />
+              ) : (
+                <AlertCircle className="w-2.5 h-2.5" />
+              )}
+              <span>Join Next</span>
+            </button>
+          )}
+          <span className="font-mono text-muted-foreground/60">{segment.id}</span>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-x-1 gap-y-1.5 text-xs leading-relaxed">

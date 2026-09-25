@@ -3,6 +3,7 @@ import { EditorShell } from "./components/editor/EditorShell";
 import { ProjectsDashboard } from "./components/projects/ProjectsDashboard";
 import { useProject } from "./hooks/useProject";
 import { projectService } from "./services/projectService";
+import { useCharacterStore } from "./stores/characterStore";
 import { Loader2 } from "lucide-react";
 
 export const App = () => {
@@ -12,6 +13,11 @@ export const App = () => {
   useEffect(() => {
     async function init() {
       try {
+        // Pre-fetch global characters immediately on startup
+        useCharacterStore.getState().fetchCharacters().catch((err) => {
+          console.warn("Could not fetch characters on init:", err);
+        });
+
         const list = await projectService.listProjects();
         const savedActiveId = localStorage.getItem("bookbite_active_project_id");
         if (savedActiveId && list.some((p) => p.id === savedActiveId)) {

@@ -169,4 +169,8 @@ class SliceGenerator:
                 new_slices.append(s)
         return new_slices
 
+    def delete_slice(self, slices: List[Slice], slice_id: str) -> List[Slice]:
+        """Removes a slice by its ID."""
+        return [s for s in slices if s.id != slice_id]
+
 slice_generator = SliceGenerator()

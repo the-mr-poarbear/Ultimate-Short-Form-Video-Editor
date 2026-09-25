@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from "react";
 import { useEditorStore } from "../../stores/editorStore";
 import { TranscriptSegment } from "./TranscriptSegment";
 import { useAudioPlayer } from "../../hooks/useAudioPlayer";
-import { FileText, Sparkles, Scissors, Check, Type } from "lucide-react";
+import { FileText, Sparkles, Scissors, Check, Type, Merge, AlertCircle, CheckSquare } from "lucide-react";
 
 interface TranscriptPanelProps {
   onTranscribeClick?: () => void;
@@ -20,9 +20,14 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   const setCaptionSettingsOpen = useEditorStore((s) => s.setCaptionSettingsOpen);
   const isSliceMode = useEditorStore((s) => s.isSliceMode);
   const setSliceMode = useEditorStore((s) => s.setSliceMode);
+  const joinTranscriptions = useEditorStore((s) => s.joinTranscriptions);
+  const canJoinTranscriptions = useEditorStore((s) => s.canJoinTranscriptions);
   const { seek } = useAudioPlayer();
 
   const [sliceFeedback, setSliceFeedback] = useState<string | null>(null);
+  const [errorFeedback, setErrorFeedback] = useState<string | null>(null);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const transcript = project?.transcript || [];
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -32,6 +37,25 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
     seek(time);
     setSliceFeedback(`New timeline slice created at ${time.toFixed(2)}s`);
     setTimeout(() => setSliceFeedback(null), 2500);
+  };
+
+  const handleJoin = (ids: string[]) => {
+    const res = joinTranscriptions(ids);
+    if (res.success) {
+      setSliceFeedback(`Joined ${ids.length} transcriptions so they now occupy 1 slice.`);
+      setErrorFeedback(null);
+      setSelectedIds([]);
+      setTimeout(() => setSliceFeedback(null), 3000);
+    } else {
+      setErrorFeedback(res.error || "Cannot join transcriptions.");
+      setTimeout(() => setErrorFeedback(null), 6000);
+    }
+  };
+
+  const toggleSelectSegment = (id: string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
   };
 
   // Auto-scroll active segment into view gently during playback
@@ -65,6 +89,24 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
           >
             <Type className="w-2.5 h-2.5 text-primary" />
             <span>Caption Style</span>
+          </button>
+
+          {/* Join Tool Button */}
+          <button
+            type="button"
+            onClick={() => {
+              setIsSelectMode(!isSelectMode);
+              if (isSelectMode) setSelectedIds([]);
+            }}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              isSelectMode
+                ? "bg-primary text-primary-foreground font-bold shadow-xs"
+                : "bg-surface-elevated hover:bg-surface-hover text-muted-foreground hover:text-foreground border border-border/50"
+            }`}
+            title="Select multiple transcript segments to join them into 1 slice"
+          >
+            <Merge className="w-2.5 h-2.5" />
+            <span>{isSelectMode ? "Cancel Select" : "Join Tool"}</span>
           </button>
 
           {/* Slice Tool Button */}
@@ -112,6 +154,58 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
         </div>
       )}
 
+      {/* Select Mode Bar */}
+      {isSelectMode && (
+        <div className="px-3 py-1.5 bg-primary/10 border-b border-primary/25 text-[10px] text-foreground flex items-center justify-between animate-in fade-in select-none">
+          <div className="flex items-center gap-1.5">
+            <CheckSquare className="w-3 h-3 text-primary" />
+            <span className="font-medium text-primary">
+              {selectedIds.length === 0
+                ? "Select 2 or more segments to join into 1 slice."
+                : `${selectedIds.length} segment(s) selected.`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            {selectedIds.length >= 2 && (
+              <button
+                type="button"
+                onClick={() => handleJoin(selectedIds)}
+                className="flex items-center gap-1 px-2 py-0.5 rounded bg-primary text-primary-foreground font-semibold shadow-xs hover:bg-primary/90 cursor-pointer"
+              >
+                <Merge className="w-2.5 h-2.5" />
+                <span>Join Selected into 1 Slice</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setIsSelectMode(false);
+                setSelectedIds([]);
+              }}
+              className="text-[9px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error Feedback Toast */}
+      {errorFeedback && (
+        <div className="px-3 py-1.5 bg-danger/15 text-danger border-b border-danger/30 text-[10px] animate-in fade-in flex items-center justify-between gap-1.5 select-none">
+          <div className="flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>{errorFeedback}</span>
+          </div>
+          <button
+            onClick={() => setErrorFeedback(null)}
+            className="text-xs hover:text-white font-bold px-1 cursor-pointer"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* Slice Feedback Toast */}
       {sliceFeedback && (
         <div className="px-3 py-1 bg-primary/20 text-primary border-b border-primary/30 text-[10px] font-mono text-center animate-in fade-in flex items-center justify-center gap-1">
@@ -130,16 +224,27 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             </span>
           </div>
         ) : (
-          transcript.map((seg) => (
-            <TranscriptSegment
-              key={seg.id}
-              segment={seg}
-              currentTime={currentTime}
-              isSliceMode={isSliceMode}
-              onSeek={seek}
-              onSliceWord={handleSliceWord}
-            />
-          ))
+          transcript.map((seg, idx) => {
+            const nextSeg = idx < transcript.length - 1 ? transcript[idx + 1] : null;
+            const joinCheck = nextSeg ? canJoinTranscriptions([seg.id, nextSeg.id]) : null;
+
+            return (
+              <TranscriptSegment
+                key={seg.id}
+                segment={seg}
+                currentTime={currentTime}
+                isSliceMode={isSliceMode}
+                onSeek={seek}
+                onSliceWord={handleSliceWord}
+                onJoinWithNext={nextSeg ? () => handleJoin([seg.id, nextSeg.id]) : undefined}
+                canJoinWithNext={joinCheck?.canJoin}
+                joinDisabledReason={joinCheck?.reason}
+                isSelectMode={isSelectMode}
+                isSelected={selectedIds.includes(seg.id)}
+                onToggleSelect={() => toggleSelectSegment(seg.id)}
+              />
+            );
+          })
         )}
       </div>
     </div>
