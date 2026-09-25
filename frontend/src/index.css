@@ -1,0 +1,324 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@import "tailwindcss";
+
+/* =========================================================
+Theme
+========================================================= */
+
+@theme {
+  --color-background: var(--background);
+
+  --color-surface: var(--surface);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+
+  --color-foreground: var(--foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+
+  --color-timeline-audio: var(--timeline-audio);
+  --color-timeline-slice: var(--timeline-slice);
+  --color-timeline-selected: var(--timeline-selected);
+  --color-playhead: var(--playhead);
+
+  --font-sans:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+
+  --font-mono:
+    "JetBrains Mono",
+    "SFMono-Regular",
+    Menlo,
+    Consolas,
+    monospace;
+}
+
+/* =========================================================
+CSS Variables
+========================================================= */
+
+:root {
+  --background: #0b0d11;
+
+  --surface: #12161f;
+  --surface-elevated: #181e2b;
+  --surface-hover: #20283a;
+
+  --border: #222a38;
+  --border-subtle: #161b24;
+
+  --foreground: #f1f5f9;
+
+  --muted: #4b5568;
+  --muted-foreground: #8b99ae;
+
+  --primary: #3b82f6;
+  --primary-hover: #2563eb;
+  --primary-foreground: #ffffff;
+
+  --accent: #6366f1;
+  --accent-foreground: #ffffff;
+
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+
+  --timeline-audio: #17263b;
+  --timeline-slice: #131923;
+  --timeline-selected: #2563eb;
+  --playhead: #f43f5e;
+}
+
+/* =========================================================
+Base
+========================================================= */
+
+@layer base {
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased overflow-hidden select-none;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: default;
+  }
+}
+
+/* =========================================================
+Panels
+========================================================= */
+
+@layer components {
+  .panel {
+    @apply flex flex-col overflow-hidden rounded-lg border border-border bg-surface;
+  }
+
+  .panel-header {
+    @apply flex items-center justify-between border-b border-border bg-surface-elevated/40 px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted-foreground;
+  }
+
+  .panel-content {
+    @apply flex-1 overflow-y-auto p-4;
+  }
+
+  /* =======================================================
+Buttons
+======================================================= */
+
+  .editor-btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors;
+    @apply focus:outline-none focus:ring-1 focus:ring-primary;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .editor-btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors;
+    @apply focus:outline-none focus:ring-1 focus:ring-primary;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+    @apply bg-primary text-primary-foreground shadow-sm hover:bg-primary-hover;
+  }
+
+  .editor-btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors;
+    @apply focus:outline-none focus:ring-1 focus:ring-primary;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+    @apply border border-border bg-surface-elevated text-foreground hover:bg-surface-hover;
+  }
+
+  .editor-btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors;
+    @apply focus:outline-none focus:ring-1 focus:ring-primary;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+    @apply text-muted-foreground hover:bg-surface-hover hover:text-foreground;
+  }
+
+  .editor-btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors;
+    @apply focus:outline-none focus:ring-1 focus:ring-primary;
+    @apply disabled:pointer-events-none disabled:opacity-50;
+    @apply border border-danger/20 bg-danger/10 text-danger hover:bg-danger/20;
+  }
+
+  /* =======================================================
+Form Elements
+======================================================= */
+
+  .input-field {
+    @apply rounded-md border border-border bg-surface-elevated px-2.5 py-1.5 text-xs text-foreground transition-colors;
+    @apply focus:border-primary focus:outline-none;
+  }
+
+  .select-field {
+    @apply cursor-pointer rounded-md border border-border bg-surface-elevated px-2.5 py-1.5 text-xs text-foreground transition-colors;
+    @apply focus:border-primary focus:outline-none;
+  }
+
+  /* =======================================================
+Timeline
+======================================================= */
+
+  .timeline-track {
+    @apply relative flex h-20 w-full items-center overflow-hidden rounded-md border border-border/60 bg-timeline-slice;
+  }
+
+  .timeline-item {
+    @apply absolute h-full rounded border transition-all;
+  }
+
+  /* =======================================================
+Slice Cards
+======================================================= */
+
+  .slice-card {
+    @apply relative flex h-full flex-shrink-0 cursor-pointer select-none flex-col justify-between rounded-md border border-border bg-surface-elevated p-2 transition-all;
+    @apply hover:border-border/90;
+  }
+
+  .slice-card-active {
+    @apply border-primary bg-surface-hover ring-1 ring-primary/40;
+  }
+
+  .slice-card-selected {
+    @apply border-primary ring-2 ring-primary;
+  }
+
+  /* =======================================================
+Drop Zones
+======================================================= */
+
+  .drop-zone {
+    @apply flex flex-col items-center justify-center rounded-md border border-dashed border-border text-center text-muted-foreground transition-all;
+    @apply hover:border-primary/50 hover:bg-primary/5;
+  }
+
+  .drop-zone-active {
+    @apply border-primary bg-primary/10 text-primary;
+  }
+
+  /* =======================================================
+Typography
+======================================================= */
+
+  .editor-title {
+    @apply text-base font-semibold tracking-tight text-foreground;
+  }
+
+  .section-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-muted-foreground;
+  }
+
+  .body {
+    @apply text-sm text-foreground;
+  }
+
+  .body-small {
+    @apply text-xs text-muted-foreground;
+  }
+
+  .caption {
+    @apply text-[11px] leading-tight text-muted-foreground;
+  }
+
+  .timeline-label {
+    @apply font-mono text-[10px] uppercase tracking-widest text-muted-foreground;
+  }
+
+  .metadata {
+    @apply font-mono text-[11px] text-muted-foreground;
+  }
+}
+
+/* =========================================================
+Scrollbars
+========================================================= */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* =========================================================
+   Slice Video Transitions
+   ========================================================= */
+
+@keyframes kenBurnsZoomIn {
+  0% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1.15);
+  }
+}
+
+@keyframes kenBurnsZoomOut {
+  0% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes sliceFadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
