@@ -43,6 +43,33 @@ class Slice(BaseModel):
     visual: Optional[SliceVisual] = None
     character: Optional[SliceCharacter] = None
 
+class TimelineOverlay(BaseModel):
+    id: str
+    overlayId: Optional[str] = None
+    url: str
+    name: str
+    start: float
+    end: float
+    positionX: float = 50.0  # 0 to 100% center
+    positionY: float = 50.0  # 0 to 100% center
+    width: float = 30.0      # width in % of 9:16 canvas
+    height: float = 30.0     # height in % of 9:16 canvas
+    scale: float = 1.0       # 0.2 to 3.0
+    rotation: float = 0.0    # -180 to 180 deg
+    opacity: float = 1.0     # 0.0 to 1.0
+    flipX: bool = False
+    animation: str = "none"  # "bounce", "pulse", "spin", "fade", "slide-up", "slide-down", "slide-left", "slide-right", "pop", "wiggle", "none"
+    lane: Optional[int] = 0
+
+class TimelineSoundEffect(BaseModel):
+    id: str
+    sfxId: Optional[str] = None
+    url: str
+    name: str
+    start: float             # start offset in seconds
+    duration: float = 1.0    # duration in seconds
+    volume: float = 0.8      # 0.0 to 1.0
+
 class CaptionStyle(BaseModel):
     fontFamily: str = "Inter"
     fontSize: int = 48
@@ -85,6 +112,8 @@ class Project(BaseModel):
     mediaAssets: List[MediaAsset] = []
     backgroundVideo: Optional[str] = None
     backgroundMusic: Optional[BackgroundMusic] = None
+    overlays: List[TimelineOverlay] = Field(default_factory=list)
+    soundEffects: List[TimelineSoundEffect] = Field(default_factory=list)
     settings: ProjectSettings = Field(default_factory=ProjectSettings)
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None

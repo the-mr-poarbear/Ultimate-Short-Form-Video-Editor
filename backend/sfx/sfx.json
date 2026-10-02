@@ -1,0 +1,92 @@
+[
+  {
+    "id": "sfx-whoosh-fast",
+    "name": "Fast Whoosh",
+    "category": "whoosh",
+    "url": "/sfx_media/assets/whoosh_fast.wav",
+    "duration": 0.35,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.850131+00:00"
+  },
+  {
+    "id": "sfx-bubble-pop",
+    "name": "Bubble Pop",
+    "category": "pop",
+    "url": "/sfx_media/assets/bubble_pop.wav",
+    "duration": 0.12,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.858794+00:00"
+  },
+  {
+    "id": "sfx-bell-ding",
+    "name": "Bell Ding",
+    "category": "chime",
+    "url": "/sfx_media/assets/bell_ding.wav",
+    "duration": 0.8,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.901192+00:00"
+  },
+  {
+    "id": "sfx-bass-punch",
+    "name": "Bass Punch",
+    "category": "impact",
+    "url": "/sfx_media/assets/bass_punch.wav",
+    "duration": 0.35,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.920931+00:00"
+  },
+  {
+    "id": "sfx-ui-click",
+    "name": "Crisp Click",
+    "category": "pop",
+    "url": "/sfx_media/assets/ui_click.wav",
+    "duration": 0.07,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.938913+00:00"
+  },
+  {
+    "id": "sfx-cartoon-boing",
+    "name": "Cartoon Boing",
+    "category": "voice",
+    "url": "/sfx_media/assets/cartoon_boing.wav",
+    "duration": 0.55,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.958812+00:00"
+  },
+  {
+    "id": "sfx-riser-swell",
+    "name": "Tension Riser",
+    "category": "whoosh",
+    "url": "/sfx_media/assets/riser_swell.wav",
+    "duration": 1.1,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:07.007322+00:00"
+  },
+  {
+    "id": "sfx-cyber-beep",
+    "name": "Cyber Glitch Beep",
+    "category": "voice",
+    "url": "/sfx_media/assets/cyber_beep.wav",
+    "duration": 0.28,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:07.045878+00:00"
+  },
+  {
+    "id": "sfx-success-chime",
+    "name": "Success Chime",
+    "category": "chime",
+    "url": "/sfx_media/assets/success_chime.wav",
+    "duration": 0.75,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:07.101269+00:00"
+  },
+  {
+    "id": "sfx-robot-voice",
+    "name": "Robot Voice Accent",
+    "category": "voice",
+    "url": "/sfx_media/assets/robot_voice.wav",
+    "duration": 0.45,
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:07.123747+00:00"
+  }
+]

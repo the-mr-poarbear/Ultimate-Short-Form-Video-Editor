@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
-from app.routes import projects, audio, transcription, slices, media, render, jobs, characters
+from app.routes import projects, audio, transcription, slices, media, render, jobs, characters, overlays, sfx
 
 app = FastAPI(
     title="Book Bite Video Editor API",
@@ -26,10 +26,16 @@ app.add_middleware(
 app.mount("/media", StaticFiles(directory=str(settings.PROJECTS_DIR)), name="media")
 # Mount global characters directory for character pose streaming
 app.mount("/characters_media", StaticFiles(directory=str(settings.CHARACTERS_DIR)), name="characters_media")
+# Mount global overlays directory for graphic & animation streaming
+app.mount("/overlays_media", StaticFiles(directory=str(settings.OVERLAYS_DIR)), name="overlays_media")
+# Mount global sound effects directory for audio streaming
+app.mount("/sfx_media", StaticFiles(directory=str(settings.SFX_DIR)), name="sfx_media")
 
 # Include Routers
 app.include_router(projects.router)
 app.include_router(characters.router)
+app.include_router(overlays.router)
+app.include_router(sfx.router)
 app.include_router(audio.router)
 app.include_router(transcription.router)
 app.include_router(slices.router)

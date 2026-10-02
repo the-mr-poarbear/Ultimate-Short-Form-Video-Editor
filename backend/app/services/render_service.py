@@ -385,6 +385,71 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
             current_canvas = next_char_canvas
 
+        # Timeline Overlays (Secondary Timeline Visual FX & Animations)
+        timeline_overlays = getattr(project, "overlays", []) or []
+        timeline_overlays = sorted(timeline_overlays, key=lambda o: (getattr(o, "lane", 0) or 0, o.start))
+        for ov_idx, ov in enumerate(timeline_overlays):
+            ov_dur = max(ov.end - ov.start, 0.1)
+            ov_file = None
+            if ov.url.startswith("/overlays_media/"):
+                rel_p = ov.url.replace("/overlays_media/", "", 1).split("?")[0]
+                cand = settings.OVERLAYS_DIR / rel_p
+                if cand.exists():
+                    ov_file = cand
+            elif ov.url.startswith("/media/"):
+                rel_p = ov.url.replace("/media/", "", 1).split("?")[0]
+                cand = settings.PROJECTS_DIR / rel_p
+                if cand.exists():
+                    ov_file = cand
+            else:
+                cand = settings.OVERLAYS_DIR / "assets" / Path(ov.url).name
+                if cand.exists():
+                    ov_file = cand
+
+            if not ov_file or not ov_file.exists():
+                continue
+
+            ov_input_idx = input_index
+            input_index += 1
+
+            is_gif = ov_file.suffix.lower() == ".gif"
+            if is_gif:
+                inputs.extend(["-stream_loop", "-1", "-i", str(ov_file)])
+            else:
+                inputs.extend(["-loop", "1", "-i", str(ov_file)])
+
+            tag_ov = f"ov_{ov_idx}"
+            scale_fac = ov.scale if ov.scale is not None else 1.0
+            ov_w = max(20, int(1080 * (ov.width or 30.0) / 100.0 * scale_fac))
+            ov_h = max(20, int(1920 * (ov.height or 30.0) / 100.0 * scale_fac))
+            ov_w = (ov_w // 2) * 2
+            ov_h = (ov_h // 2) * 2
+
+            pos_x = ov.positionX if ov.positionX is not None else 50.0
+            pos_y = ov.positionY if ov.positionY is not None else 50.0
+            overlay_ox = int((1080 * pos_x / 100.0) - ov_w / 2)
+            overlay_oy = int((1920 * pos_y / 100.0) - ov_h / 2)
+
+            ov_filters = (
+                f"scale={ov_w}:{ov_h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+                f"pad={ov_w}:{ov_h}:(ow-iw)/2:(oh-ih)/2:color=0x00000000"
+            )
+            if getattr(ov, "flipX", False):
+                ov_filters += ",hflip"
+            if getattr(ov, "rotation", 0.0) and abs(ov.rotation) > 0.1:
+                ov_filters += f",rotate={ov.rotation:.2f}*PI/180:c=none:ow=rotw({ov.rotation:.2f}*PI/180):oh=roth({ov.rotation:.2f}*PI/180)"
+            if getattr(ov, "opacity", 1.0) and ov.opacity < 0.99:
+                ov_filters += f",colorchannelmixer=aa={ov.opacity:.2f}"
+
+            ov_filters += f",format=yuva420p,trim=duration={ov_dur:.3f},setpts=PTS-STARTPTS+{ov.start:.3f}/TB"
+
+            filter_graphs.append(f"[{ov_input_idx}:v]{ov_filters}[{tag_ov}];")
+            next_ov_canvas = f"ov_canvas_{ov_idx}"
+            filter_graphs.append(
+                f"[{current_canvas}][{tag_ov}]overlay={overlay_ox}:{overlay_oy}:enable='between(t,{ov.start:.3f},{ov.end:.3f})':eof_action=pass[{next_ov_canvas}];"
+            )
+            current_canvas = next_ov_canvas
+
         # Background music input
         has_bgm = bool(bgm_path)
         bgm_input_idx = None
@@ -396,6 +461,34 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 inputs.extend(["-stream_loop", "-1", "-i", str(bgm_path)])
             else:
                 inputs.extend(["-i", str(bgm_path)])
+
+        # Timeline Sound Effects (Secondary Timeline Audio FX)
+        timeline_sfx = getattr(project, "soundEffects", []) or []
+        sfx_inputs = []
+        for sfx_idx, sfx in enumerate(timeline_sfx):
+            sfx_file = None
+            if sfx.url.startswith("/sfx_media/"):
+                rel_p = sfx.url.replace("/sfx_media/", "", 1).split("?")[0]
+                cand = settings.SFX_DIR / rel_p
+                if cand.exists():
+                    sfx_file = cand
+            elif sfx.url.startswith("/media/"):
+                rel_p = sfx.url.replace("/media/", "", 1).split("?")[0]
+                cand = settings.PROJECTS_DIR / rel_p
+                if cand.exists():
+                    sfx_file = cand
+            else:
+                cand = settings.SFX_DIR / "assets" / Path(sfx.url).name
+                if cand.exists():
+                    sfx_file = cand
+
+            if not sfx_file or not sfx_file.exists():
+                continue
+
+            sfx_in_idx = input_index
+            input_index += 1
+            inputs.extend(["-i", str(sfx_file)])
+            sfx_inputs.append((sfx_in_idx, sfx))
 
         # Final subtitles filter
         # Escape path for FFmpeg subtitles filter on Windows
@@ -411,17 +504,36 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 f"[{current_canvas}]subtitles='{escaped_ass}'[outv]"
             )
 
-        # Audio mixing if background music is active
-        audio_map_tag = "0:a"
+        # Audio mixing: Master voiceover (0:a) + Background music + Timeline Sound Effects
+        audio_mix_inputs = ["[voice]"]
+        filter_graphs.append(";[0:a]volume=1.0[voice];")
+
         if has_bgm and bgm_input_idx is not None:
             bgm_vol = getattr(project.backgroundMusic, "volume", 0.15) if project.backgroundMusic else 0.15
             fade_in = getattr(project.backgroundMusic, "fadeInDuration", 1.0) if project.backgroundMusic else 1.0
             fade_out = getattr(project.backgroundMusic, "fadeOutDuration", 2.0) if project.backgroundMusic else 2.0
             fade_out_st = max(0.0, duration - fade_out)
             filter_graphs.append(
-                f";[0:a]volume=1.0[voice];[{bgm_input_idx}:a]volume={bgm_vol:.3f},afade=t=in:st=0:d={fade_in:.2f},afade=t=out:st={fade_out_st:.2f}:d={fade_out:.2f},atrim=duration={duration:.3f}[bgm_aud];[voice][bgm_aud]amix=inputs=2:duration=first:dropout_transition=2[outa]"
+                f"[{bgm_input_idx}:a]volume={bgm_vol:.3f},afade=t=in:st=0:d={fade_in:.2f},afade=t=out:st={fade_out_st:.2f}:d={fade_out:.2f},atrim=duration={duration:.3f}[bgm_aud];"
+            )
+            audio_mix_inputs.append("[bgm_aud]")
+
+        for s_idx, (in_idx, sfx) in enumerate(sfx_inputs):
+            sfx_vol = getattr(sfx, "volume", 0.8) if sfx.volume is not None else 0.8
+            start_ms = max(0, int(sfx.start * 1000))
+            tag_sfx = f"sfx_aud_{s_idx}"
+            filter_graphs.append(
+                f"[{in_idx}:a]volume={sfx_vol:.3f},adelay={start_ms}|{start_ms},atrim=duration={duration:.3f}[{tag_sfx}];"
+            )
+            audio_mix_inputs.append(f"[{tag_sfx}]")
+
+        if len(audio_mix_inputs) > 1:
+            filter_graphs.append(
+                f"{''.join(audio_mix_inputs)}amix=inputs={len(audio_mix_inputs)}:duration=first:dropout_transition=2[outa]"
             )
             audio_map_tag = "[outa]"
+        else:
+            audio_map_tag = "[voice]"
 
         full_filter = "".join(filter_graphs)
 

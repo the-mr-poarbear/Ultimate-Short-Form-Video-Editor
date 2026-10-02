@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Project, Slice, ProjectSettings, SliceVisual, SliceCharacter, BackgroundMusic } from "../types/project";
+import type { Project, Slice, ProjectSettings, SliceVisual, SliceCharacter, BackgroundMusic, TimelineOverlay, TimelineSoundEffect } from "../types/project";
 import type { MediaAsset } from "../types/media";
 import type { Job } from "../types/jobs";
 import { DEFAULT_PIXELS_PER_SECOND } from "../lib/timeline";
@@ -15,7 +15,12 @@ interface EditorState {
 
   selectedSliceId: string | null;
   selectedAssetId: string | null;
+  selectedOverlayId: string | null;
+  selectedSoundEffectId: string | null;
   activeJob: Job | null;
+
+  isOverlaysModalOpen: boolean;
+  isSfxModalOpen: boolean;
 
   // History & Persistence
   past: Project[];
@@ -63,6 +68,19 @@ interface EditorState {
   updateBackgroundMusicSettings: (settings: Partial<BackgroundMusic>) => void;
   isBackgroundMusicModalOpen: boolean;
   setBackgroundMusicModalOpen: (open: boolean) => void;
+
+  selectOverlay: (id: string | null) => void;
+  selectSoundEffect: (id: string | null) => void;
+  setOverlaysModalOpen: (open: boolean) => void;
+  setSfxModalOpen: (open: boolean) => void;
+
+  addOverlayToTimeline: (overlay: Omit<TimelineOverlay, "id">) => string;
+  updateTimelineOverlay: (id: string, patch: Partial<TimelineOverlay>, isContinuous?: boolean) => void;
+  removeTimelineOverlay: (id: string) => void;
+
+  addSoundEffectToTimeline: (sfx: Omit<TimelineSoundEffect, "id">) => string;
+  updateTimelineSoundEffect: (id: string, patch: Partial<TimelineSoundEffect>, isContinuous?: boolean) => void;
+  removeTimelineSoundEffect: (id: string) => void;
 
   setSlices: (slices: Slice[]) => void;
   splitSlice: (sliceId: string, time: number) => void;
@@ -130,11 +148,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   selectedSliceId: null,
   selectedAssetId: null,
+  selectedOverlayId: null,
+  selectedSoundEffectId: null,
   activeJob: null,
   isCaptionSettingsOpen: false,
   isSliceMode: false,
   isSliceSettingsOpen: false,
   isBackgroundMusicModalOpen: false,
+  isOverlaysModalOpen: false,
+  isSfxModalOpen: false,
 
   past: [],
   future: [],
@@ -530,6 +552,123 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setBackgroundMusicModalOpen: (isBackgroundMusicModalOpen) =>
     set({ isBackgroundMusicModalOpen }),
+
+  selectOverlay: (id) =>
+    set({
+      selectedOverlayId: id,
+      selectedSliceId: id ? null : get().selectedSliceId,
+      selectedSoundEffectId: null,
+    }),
+
+  selectSoundEffect: (id) =>
+    set({
+      selectedSoundEffectId: id,
+      selectedSliceId: id ? null : get().selectedSliceId,
+      selectedOverlayId: null,
+    }),
+
+  setOverlaysModalOpen: (isOverlaysModalOpen) => set({ isOverlaysModalOpen }),
+  setSfxModalOpen: (isSfxModalOpen) => set({ isSfxModalOpen }),
+
+  addOverlayToTimeline: (overlayData) => {
+    const id = `ov-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newOverlay: TimelineOverlay = { ...overlayData, id };
+    set((state) => {
+      if (!state.project) return state;
+      const hist = pushHistory(state);
+      const existing = state.project.overlays || [];
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          overlays: [...existing, newOverlay].sort((a, b) => a.start - b.start),
+        },
+        selectedOverlayId: id,
+      };
+    });
+    return id;
+  },
+
+  updateTimelineOverlay: (id, patch, isContinuous = false) => {
+    set((state) => {
+      if (!state.project) return state;
+      const hist = pushHistory(state, isContinuous);
+      const existing = state.project.overlays || [];
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          overlays: existing.map((o) => (o.id === id ? { ...o, ...patch } : o)),
+        },
+      };
+    });
+  },
+
+  removeTimelineOverlay: (id) => {
+    set((state) => {
+      if (!state.project) return state;
+      const hist = pushHistory(state);
+      const existing = state.project.overlays || [];
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          overlays: existing.filter((o) => o.id !== id),
+        },
+        selectedOverlayId: state.selectedOverlayId === id ? null : state.selectedOverlayId,
+      };
+    });
+  },
+
+  addSoundEffectToTimeline: (sfxData) => {
+    const id = `sfx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newSfx: TimelineSoundEffect = { ...sfxData, id };
+    set((state) => {
+      if (!state.project) return state;
+      const hist = pushHistory(state);
+      const existing = state.project.soundEffects || [];
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          soundEffects: [...existing, newSfx].sort((a, b) => a.start - b.start),
+        },
+        selectedSoundEffectId: id,
+      };
+    });
+    return id;
+  },
+
+  updateTimelineSoundEffect: (id, patch, isContinuous = false) => {
+    set((state) => {
+      if (!state.project) return state;
+      const hist = pushHistory(state, isContinuous);
+      const existing = state.project.soundEffects || [];
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          soundEffects: existing.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+        },
+      };
+    });
+  },
+
+  removeTimelineSoundEffect: (id) => {
+    set((state) => {
+      if (!state.project) return state;
+      const hist = pushHistory(state);
+      const existing = state.project.soundEffects || [];
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          soundEffects: existing.filter((s) => s.id !== id),
+        },
+        selectedSoundEffectId: state.selectedSoundEffectId === id ? null : state.selectedSoundEffectId,
+      };
+    });
+  },
 
   setSlices: (slices) =>
     set((state) => {

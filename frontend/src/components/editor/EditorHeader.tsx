@@ -34,6 +34,8 @@ interface EditorHeaderProps {
   onCloseToDashboard: () => void;
   onOpenBackgroundMusic: () => void;
   onOpenCharacters?: () => void;
+  onOpenOverlays?: () => void;
+  onOpenSfx?: () => void;
   isTranscribing?: boolean;
 }
 
@@ -47,6 +49,8 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
   onCloseToDashboard,
   onOpenBackgroundMusic,
   onOpenCharacters,
+  onOpenOverlays,
+  onOpenSfx,
   isTranscribing = false,
 }) => {
   const project = useEditorStore((s) => s.project);
@@ -441,6 +445,32 @@ export const EditorHeader: React.FC<EditorHeaderProps> = ({
           >
             <Users className="w-3.5 h-3.5 text-amber-400" />
             <span>Characters</span>
+          </button>
+        )}
+
+        {/* Global Animation Overlays Button */}
+        {onOpenOverlays && (
+          <button
+            type="button"
+            onClick={onOpenOverlays}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer bg-surface-elevated/70 hover:bg-surface-hover text-foreground/90 border border-border/80 hover:border-pink-500/50"
+            title="Configure animation overlays and graphics library globally"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-pink-400" />
+            <span>Overlays</span>
+          </button>
+        )}
+
+        {/* Global Sound Effects Button */}
+        {onOpenSfx && (
+          <button
+            type="button"
+            onClick={onOpenSfx}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer bg-surface-elevated/70 hover:bg-surface-hover text-foreground/90 border border-border/80 hover:border-emerald-500/50"
+            title="Configure sound effects and voice accents library globally"
+          >
+            <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Sound FX</span>
           </button>
         )}
 

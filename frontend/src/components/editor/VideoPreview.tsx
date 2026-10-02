@@ -4,7 +4,7 @@ import { useCharacterStore } from "../../stores/characterStore";
 import { getMediaUrl } from "../../services/api";
 import { CaptionPreview } from "../captions/CaptionPreview";
 import { Move, Maximize2 } from "lucide-react";
-import type { Slice } from "../../types/project";
+import type { Slice, TimelineOverlay } from "../../types/project";
 import type { MediaAsset } from "../../types/media";
 
 interface VideoPreviewProps {
@@ -492,6 +492,9 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
   const updateSliceCharacter = useEditorStore((s) => s.updateSliceCharacter);
   const selectSlice = useEditorStore((s) => s.selectSlice);
   const setSliceSettingsOpen = useEditorStore((s) => s.setSliceSettingsOpen);
+  const selectedOverlayId = useEditorStore((s) => s.selectedOverlayId);
+  const selectOverlay = useEditorStore((s) => s.selectOverlay);
+  const updateTimelineOverlay = useEditorStore((s) => s.updateTimelineOverlay);
   const characters = useCharacterStore((s) => s.characters);
 
   const outerContainerRef = useRef<HTMLDivElement | null>(null);
@@ -976,6 +979,94 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
     [activeSlice, updateSliceCharacter]
   );
 
+  // Overlay move handler (drag on canvas to reposition X and Y)
+  const handleOverlayMouseDown = useCallback(
+    (e: React.MouseEvent, overlay: TimelineOverlay) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      useEditorStore.getState().beginBatch();
+      selectOverlay(overlay.id);
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const startMouseX = e.clientX;
+      const startMouseY = e.clientY;
+      const startPosX = overlay.positionX ?? 50;
+      const startPosY = overlay.positionY ?? 50;
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        const deltaX = ((moveEvent.clientX - startMouseX) / rect.width) * 100;
+        const deltaY = ((moveEvent.clientY - startMouseY) / rect.height) * 100;
+
+        const newX = Math.max(5, Math.min(95, Math.round(startPosX + deltaX)));
+        const newY = Math.max(5, Math.min(95, Math.round(startPosY + deltaY)));
+
+        updateTimelineOverlay(
+          overlay.id,
+          {
+            positionX: newX,
+            positionY: newY,
+          },
+          true
+        );
+      };
+
+      const onMouseUp = () => {
+        useEditorStore.getState().endBatch();
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [selectOverlay, updateTimelineOverlay]
+  );
+
+  // Overlay corner scale handler
+  const handleOverlayResizeMouseDown = useCallback(
+    (e: React.MouseEvent, overlay: TimelineOverlay) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      useEditorStore.getState().beginBatch();
+      selectOverlay(overlay.id);
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const startMouseX = e.clientX;
+      const startScale = overlay.scale ?? 1.0;
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        const delta = (moveEvent.clientX - startMouseX) / (rect.width * 0.35);
+        const newScale = Math.max(0.2, Math.min(2.5, Math.round((startScale + delta) * 100) / 100));
+
+        updateTimelineOverlay(
+          overlay.id,
+          {
+            scale: newScale,
+          },
+          true
+        );
+      };
+
+      const onMouseUp = () => {
+        useEditorStore.getState().endBatch();
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [selectOverlay, updateTimelineOverlay]
+  );
+
   return (
     <div
       ref={outerContainerRef}
@@ -1206,6 +1297,75 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
             )}
           </div>
         )}
+
+        {/* Layer 3.5: Timeline Overlays & Visual Animations */}
+        {project?.overlays &&
+          [...project.overlays]
+            .sort((a, b) => ((a.lane ?? 0) - (b.lane ?? 0)) || (a.start - b.start))
+            .map((ov) => {
+              const isVisible = currentTime >= ov.start && currentTime <= ov.end;
+              if (!isVisible) return null;
+
+              const isSelected = selectedOverlayId === ov.id;
+              const ovW = (ov.width ?? 30) * (ov.scale ?? 1.0);
+              const ovH = (ov.height ?? 30) * (ov.scale ?? 1.0);
+              const posX = ov.positionX ?? 50;
+              const posY = ov.positionY ?? 50;
+              const rot = ov.rotation ?? 0;
+              const flip = ov.flipX ? "scaleX(-1)" : "";
+              const animClass =
+                ov.animation && ov.animation !== "none" ? `anim-${ov.animation}` : "";
+
+              return (
+                <div
+                  key={ov.id}
+                  onMouseDown={(e) => handleOverlayMouseDown(e, ov)}
+                  style={{
+                    position: "absolute",
+                    left: `${posX}%`,
+                    top: `${posY}%`,
+                    width: `${ovW}%`,
+                    height: `${ovH}%`,
+                    transform: `translate(-50%, -50%) rotate(${rot}deg) ${flip}`,
+                    opacity: ov.opacity ?? 1.0,
+                    zIndex: 25 + ((ov.lane ?? 0) * 2) + (isSelected ? 5 : 0),
+                  }}
+                  className={`group cursor-grab active:cursor-grabbing select-none flex items-center justify-center ${
+                    isSelected ? "ring-2 ring-pink-500 rounded-lg" : ""
+                  }`}
+                >
+                <img
+                  src={getMediaUrl(ov.url)}
+                  alt={ov.name}
+                  className={`w-full h-full object-contain filter drop-shadow-xl pointer-events-none select-none ${animClass}`}
+                />
+
+                {isSelected && (
+                  <>
+                    <div className="absolute inset-0 border-2 border-dashed border-pink-400/90 pointer-events-none rounded-lg ring-1 ring-pink-400/30" />
+                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-black/90 text-pink-300 border border-pink-500/50 text-[10px] font-mono px-2 py-0.5 rounded shadow-xl whitespace-nowrap pointer-events-none z-30 flex items-center gap-1">
+                      <span>{ov.name}</span>
+                      {ov.animation && ov.animation !== "none" && (
+                        <>
+                          <span className="text-muted-foreground">•</span>
+                          <span className="uppercase">{ov.animation}</span>
+                        </>
+                      )}
+                    </div>
+
+                    {/* Scale corner handle */}
+                    <div
+                      onMouseDown={(e) => handleOverlayResizeMouseDown(e, ov)}
+                      className="absolute -bottom-2 -right-2 w-5 h-5 cursor-nwse-resize flex items-center justify-center z-30"
+                      title="Drag to resize overlay scale"
+                    >
+                      <div className="w-2.5 h-2.5 rounded-xs bg-pink-400 border border-black shadow-md hover:scale-125 transition-transform" />
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
 
         {/* Layer 4: Word-Highlighted Captions */}
         <CaptionPreview currentTime={currentTime} previewScale={previewScale} />

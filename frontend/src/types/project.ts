@@ -1,8 +1,10 @@
 import type { TranscriptSegment } from "./transcript";
 import type { MediaAsset } from "./media";
 import type { SliceCharacter } from "./character";
+import type { TimelineOverlay } from "./overlay";
+import type { TimelineSoundEffect } from "./sfx";
 
-export type { SliceCharacter };
+export type { SliceCharacter, TimelineOverlay, TimelineSoundEffect };
 
 export type VisualTransition =
   | "none"
@@ -97,6 +99,9 @@ export interface Project {
 
   backgroundVideo?: string;
   backgroundMusic?: BackgroundMusic;
+
+  overlays?: TimelineOverlay[];
+  soundEffects?: TimelineSoundEffect[];
 
   settings: ProjectSettings;
 

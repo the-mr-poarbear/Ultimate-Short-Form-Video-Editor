@@ -13,6 +13,8 @@ import { ProjectBrowserModal } from "../projects/ProjectBrowserModal";
 import { CreateProjectModal } from "../projects/CreateProjectModal";
 import { BackgroundMusicModal } from "../audio/BackgroundMusicModal";
 import { CharactersModal } from "../characters/CharactersModal";
+import { OverlaysModal } from "../overlays/OverlaysModal";
+import { SfxModal } from "../sfx/SfxModal";
 import { useEditorStore } from "../../stores/editorStore";
 import { useCharacterStore } from "../../stores/characterStore";
 import { useProject } from "../../hooks/useProject";
@@ -37,6 +39,10 @@ export const EditorShell: React.FC = () => {
   const updateProjectSettings = useEditorStore((s) => s.updateProjectSettings);
   const isBackgroundMusicModalOpen = useEditorStore((s) => s.isBackgroundMusicModalOpen);
   const setBackgroundMusicModalOpen = useEditorStore((s) => s.setBackgroundMusicModalOpen);
+  const isOverlaysModalOpen = useEditorStore((s) => s.isOverlaysModalOpen);
+  const setOverlaysModalOpen = useEditorStore((s) => s.setOverlaysModalOpen);
+  const isSfxModalOpen = useEditorStore((s) => s.isSfxModalOpen);
+  const setSfxModalOpen = useEditorStore((s) => s.setSfxModalOpen);
   const isCharactersModalOpen = useCharacterStore((s) => s.isCharactersModalOpen);
   const setCharactersModalOpen = useCharacterStore((s) => s.setCharactersModalOpen);
 
@@ -49,6 +55,7 @@ export const EditorShell: React.FC = () => {
   const [isUploadingAudio, setIsUploadingAudio] = useState(false);
   const [isAnalyzingAudio, setIsAnalyzingAudio] = useState(false);
   const [analysisResult, setAnalysisResult] = useState<AudioAnalysisResult | null>(null);
+  const [timelineHeight, setTimelineHeight] = useState<number>(380);
 
   const { isTranscribing, jobProgress, error: transcribeError, runTranscription } = useTranscription();
 
@@ -175,6 +182,28 @@ export const EditorShell: React.FC = () => {
     }
   };
 
+  // Draggable timeline height resize handler
+  const handleTimelineResizeMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = timelineHeight;
+
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      // Dragging up increases timeline height; dragging down decreases it
+      const deltaY = startY - moveEvent.clientY;
+      const newHeight = Math.max(260, Math.min(650, startH + deltaY));
+      setTimelineHeight(newHeight);
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen bg-background overflow-hidden">
       {/* 1. Editor Header */}
@@ -188,6 +217,8 @@ export const EditorShell: React.FC = () => {
         onCloseToDashboard={() => closeProject()}
         onOpenBackgroundMusic={() => setBackgroundMusicModalOpen(true)}
         onOpenCharacters={() => setCharactersModalOpen(true)}
+        onOpenOverlays={() => setOverlaysModalOpen(true)}
+        onOpenSfx={() => setSfxModalOpen(true)}
         isTranscribing={isTranscribing}
       />
 
@@ -208,7 +239,7 @@ export const EditorShell: React.FC = () => {
       {/* 2. Main Workspace Layout */}
       <div className="flex-1 flex flex-col p-2 gap-2 overflow-hidden">
         {/* Top Area: Media Library (Left) + 9:16 Video Preview (Right) */}
-        <div className="flex-1 flex gap-2 overflow-hidden min-h-[360px]">
+        <div className="flex-1 flex gap-2 overflow-hidden min-h-[300px]">
           <div className="w-80 flex-shrink-0 h-full">
             <MediaPanel />
           </div>
@@ -225,8 +256,17 @@ export const EditorShell: React.FC = () => {
           </div>
         </div>
 
-        {/* Bottom Area: Timeline with Slices and Master Voiceover Audio */}
-        <div className="h-72 flex-shrink-0">
+        {/* Timeline Height Drag Handle */}
+        <div
+          onMouseDown={handleTimelineResizeMouseDown}
+          className="h-2 w-full flex items-center justify-center cursor-row-resize hover:bg-primary/20 active:bg-primary/30 transition-colors group select-none flex-shrink-0 -my-1 z-20"
+          title="Drag up or down to adjust timeline height"
+        >
+          <div className="w-16 h-1 rounded-full bg-border group-hover:bg-primary/80 transition-colors" />
+        </div>
+
+        {/* Bottom Area: Timeline with Slices, Master Voiceover and Secondary Tracks */}
+        <div style={{ height: `${timelineHeight}px` }} className="flex-shrink-0 transition-none">
           <Timeline />
         </div>
       </div>
@@ -328,6 +368,18 @@ export const EditorShell: React.FC = () => {
       <CharactersModal
         isOpen={isCharactersModalOpen}
         onClose={() => setCharactersModalOpen(false)}
+      />
+
+      {/* Global Animation Overlays Modal */}
+      <OverlaysModal
+        isOpen={isOverlaysModalOpen}
+        onClose={() => setOverlaysModalOpen(false)}
+      />
+
+      {/* Global Sound Effects & Voice FX Modal */}
+      <SfxModal
+        isOpen={isSfxModalOpen}
+        onClose={() => setSfxModalOpen(false)}
       />
     </div>
   );

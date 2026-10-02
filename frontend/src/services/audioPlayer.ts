@@ -9,9 +9,24 @@ class AudioPlayerService {
   private currentBgmUrl: string | null = null;
   private bgmVolume: number = 0.15;
   private bgmLoop: boolean = true;
+  private triggeredSfxIds: Set<string> = new Set();
+  private lastCheckTime: number = 0;
+  private sfxAudioPool: HTMLAudioElement[] = [];
 
   constructor() {
     // Singleton instance
+  }
+
+  public playSfx(url: string, volume: number = 0.8) {
+    if (!url) return;
+    try {
+      const fullUrl = getMediaUrl(url);
+      const audio = new Audio(fullUrl);
+      audio.volume = Math.max(0, Math.min(1, volume));
+      audio.play().catch(() => {});
+    } catch (err) {
+      console.warn("[AudioPlayer] Error playing sfx:", err);
+    }
   }
 
   public getCurrentUrl(): string | null {
@@ -285,17 +300,21 @@ class AudioPlayerService {
       }
     }
 
+    this.triggeredSfxIds.clear();
+    this.lastCheckTime = clamped;
     useEditorStore.getState().setCurrentTime(clamped);
   }
 
   public stop() {
     this.pause();
+    this.triggeredSfxIds.clear();
     this.seek(0);
   }
 
   public clear() {
     this.teardownAudio();
     this.teardownBgm();
+    this.triggeredSfxIds.clear();
     this.currentUrl = null;
     useEditorStore.getState().setPlaying(false);
     useEditorStore.getState().setCurrentTime(0);
@@ -334,18 +353,45 @@ class AudioPlayerService {
     this.currentBgmUrl = null;
   }
 
+  private checkSfx(newTime: number) {
+    const project = useEditorStore.getState().project;
+    const sfxList = project?.soundEffects || [];
+    if (sfxList.length === 0) return;
+
+    const prev = this.lastCheckTime;
+    this.lastCheckTime = newTime;
+
+    if (newTime < prev) {
+      this.triggeredSfxIds.clear();
+      return;
+    }
+
+    for (const sfx of sfxList) {
+      if (!this.triggeredSfxIds.has(sfx.id)) {
+        if (prev <= sfx.start && newTime >= sfx.start) {
+          this.triggeredSfxIds.add(sfx.id);
+          this.playSfx(sfx.url, sfx.volume ?? 0.8);
+        }
+      }
+    }
+  }
+
   private startSyncLoop() {
     this.stopSyncLoop();
+    this.lastCheckTime = useEditorStore.getState().currentTime;
+
     const updateTime = () => {
       const isVoiceActive = this.audio && !this.audio.paused;
       const isBgmActive = this.bgmAudio && !this.bgmAudio.paused;
 
       if (isVoiceActive && this.audio) {
-        useEditorStore.getState().setCurrentTime(this.audio.currentTime);
+        const cur = this.audio.currentTime;
+        useEditorStore.getState().setCurrentTime(cur);
+        this.checkSfx(cur);
 
         // Drift correction: keep BGM synchronized to voiceover
         if (isBgmActive && this.bgmAudio && this.bgmAudio.duration) {
-          const expectedBgmTime = this.audio.currentTime % this.bgmAudio.duration;
+          const expectedBgmTime = cur % this.bgmAudio.duration;
           if (Math.abs(this.bgmAudio.currentTime - expectedBgmTime) > 0.45) {
             this.bgmAudio.currentTime = expectedBgmTime;
           }
@@ -353,7 +399,9 @@ class AudioPlayerService {
         this.animFrameId = requestAnimationFrame(updateTime);
       } else if (!isVoiceActive && isBgmActive && this.bgmAudio) {
         // Voiceover not playing or absent, BGM is driving playback
-        useEditorStore.getState().setCurrentTime(this.bgmAudio.currentTime);
+        const cur = this.bgmAudio.currentTime;
+        useEditorStore.getState().setCurrentTime(cur);
+        this.checkSfx(cur);
         this.animFrameId = requestAnimationFrame(updateTime);
       } else if (!isVoiceActive && !isBgmActive) {
         // Both stopped

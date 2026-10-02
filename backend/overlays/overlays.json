@@ -1,0 +1,142 @@
+[
+  {
+    "id": "c8b2d881",
+    "name": "Circle clean",
+    "category": "custom",
+    "type": "svg",
+    "url": "/overlays_media/assets/c8b2d881.svg",
+    "defaultAnimation": "spin",
+    "isPreset": false,
+    "createdAt": "2026-10-02T20:05:48.423083+00:00"
+  },
+  {
+    "id": "arrow-neon-down",
+    "name": "Neon Arrow Down",
+    "category": "arrows",
+    "type": "svg",
+    "url": "/overlays_media/assets/arrow_neon_down.svg",
+    "defaultAnimation": "bounce",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.552420+00:00"
+  },
+  {
+    "id": "arrow-curved-right",
+    "name": "Curved Arrow Right",
+    "category": "arrows",
+    "type": "svg",
+    "url": "/overlays_media/assets/arrow_curved_right.svg",
+    "defaultAnimation": "wiggle",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.629499+00:00"
+  },
+  {
+    "id": "arrow-hand-drawn",
+    "name": "Sketch Arrow",
+    "category": "arrows",
+    "type": "svg",
+    "url": "/overlays_media/assets/arrow_hand_drawn.svg",
+    "defaultAnimation": "wiggle",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.630507+00:00"
+  },
+  {
+    "id": "line-neon-underline",
+    "name": "Neon Glow Underline",
+    "category": "lines",
+    "type": "svg",
+    "url": "/overlays_media/assets/line_neon_underline.svg",
+    "defaultAnimation": "pulse",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.630507+00:00"
+  },
+  {
+    "id": "line-brush-accent",
+    "name": "Brush Stroke Accent",
+    "category": "lines",
+    "type": "svg",
+    "url": "/overlays_media/assets/line_brush_accent.svg",
+    "defaultAnimation": "slide-left",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.632566+00:00"
+  },
+  {
+    "id": "line-dashed-marker",
+    "name": "Dashed Target Line",
+    "category": "lines",
+    "type": "svg",
+    "url": "/overlays_media/assets/line_dashed_marker.svg",
+    "defaultAnimation": "pulse",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.634103+00:00"
+  },
+  {
+    "id": "callout-target",
+    "name": "Target Reticle",
+    "category": "callouts",
+    "type": "svg",
+    "url": "/overlays_media/assets/callout_target.svg",
+    "defaultAnimation": "pulse",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.635198+00:00"
+  },
+  {
+    "id": "callout-star-sparkle",
+    "name": "Star Sparkle Burst",
+    "category": "stickers",
+    "type": "svg",
+    "url": "/overlays_media/assets/callout_star_sparkle.svg",
+    "defaultAnimation": "spin",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.635198+00:00"
+  },
+  {
+    "id": "callout-fire-flame",
+    "name": "Fire Flame Hype",
+    "category": "stickers",
+    "type": "svg",
+    "url": "/overlays_media/assets/callout_fire_flame.svg",
+    "defaultAnimation": "bounce",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.636709+00:00"
+  },
+  {
+    "id": "callout-alert-exclamation",
+    "name": "Pop Alert Exclamation",
+    "category": "callouts",
+    "type": "svg",
+    "url": "/overlays_media/assets/callout_alert_exclamation.svg",
+    "defaultAnimation": "pop",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.637722+00:00"
+  },
+  {
+    "id": "callout-checkmark",
+    "name": "Checkmark Success",
+    "category": "callouts",
+    "type": "svg",
+    "url": "/overlays_media/assets/callout_checkmark.svg",
+    "defaultAnimation": "pop",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.638721+00:00"
+  },
+  {
+    "id": "callout-question-mark",
+    "name": "Question Mark Pop",
+    "category": "callouts",
+    "type": "svg",
+    "url": "/overlays_media/assets/callout_question_mark.svg",
+    "defaultAnimation": "wiggle",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.639225+00:00"
+  },
+  {
+    "id": "arrow-animated-gif",
+    "name": "Animated Bounce Arrow (GIF)",
+    "category": "arrows",
+    "type": "gif",
+    "url": "/overlays_media/assets/arrow_animated.gif",
+    "defaultAnimation": "none",
+    "isPreset": true,
+    "createdAt": "2026-10-02T19:34:06.731421+00:00"
+  }
+]

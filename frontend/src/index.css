@@ -322,3 +322,161 @@ Scrollbars
     opacity: 1;
   }
 }
+
+/* =========================================================
+   Overlay Animations
+   ========================================================= */
+
+@keyframes overlayBounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-16px);
+  }
+}
+
+@keyframes overlayPulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.4));
+  }
+  50% {
+    transform: scale(1.1);
+    filter: drop-shadow(0 0 20px rgba(59, 130, 246, 0.9));
+  }
+}
+
+@keyframes overlaySpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes overlayWiggle {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-10deg);
+  }
+  75% {
+    transform: rotate(10deg);
+  }
+}
+
+@keyframes overlayPop {
+  0% {
+    transform: scale(0.65);
+    opacity: 0.2;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes overlayFade {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes overlaySlideUp {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-24px);
+  }
+}
+
+@keyframes overlaySlideDown {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(24px);
+  }
+}
+
+@keyframes overlaySlideLeft {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(-24px);
+  }
+}
+
+@keyframes overlaySlideRight {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(24px);
+  }
+}
+
+@keyframes overlayGlow {
+  0%, 100% {
+    filter: drop-shadow(0 0 6px rgba(236, 72, 153, 0.5));
+  }
+  50% {
+    filter: drop-shadow(0 0 24px rgba(236, 72, 153, 1));
+  }
+}
+
+.anim-bounce {
+  animation: overlayBounce 1.2s ease-in-out infinite;
+}
+
+.anim-pulse {
+  animation: overlayPulse 1.4s ease-in-out infinite;
+}
+
+.anim-spin {
+  animation: overlaySpin 3s linear infinite;
+}
+
+.anim-wiggle {
+  animation: overlayWiggle 0.8s ease-in-out infinite;
+}
+
+.anim-pop {
+  animation: overlayPop 1s cubic-bezier(0.34, 1.56, 0.64, 1) infinite alternate;
+}
+
+.anim-fade {
+  animation: overlayFade 1.6s ease-in-out infinite;
+}
+
+.anim-slide-up {
+  animation: overlaySlideUp 1.4s ease-in-out infinite;
+}
+
+.anim-slide-down {
+  animation: overlaySlideDown 1.4s ease-in-out infinite;
+}
+
+.anim-slide-left {
+  animation: overlaySlideLeft 1.4s ease-in-out infinite;
+}
+
+.anim-slide-right {
+  animation: overlaySlideRight 1.4s ease-in-out infinite;
+}
+
+.anim-glow {
+  animation: overlayGlow 1.5s ease-in-out infinite;
+}

@@ -17,7 +17,11 @@ class Settings:
     
     PROJECTS_DIR: Path = BASE_DIR / os.getenv("PROJECTS_DIR", "projects")
     CHARACTERS_DIR: Path = BASE_DIR / os.getenv("CHARACTERS_DIR", "characters")
+    OVERLAYS_DIR: Path = BASE_DIR / os.getenv("OVERLAYS_DIR", "overlays")
+    SFX_DIR: Path = BASE_DIR / os.getenv("SFX_DIR", "sfx")
 
 settings = Settings()
 settings.PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 settings.CHARACTERS_DIR.mkdir(parents=True, exist_ok=True)
+settings.OVERLAYS_DIR.mkdir(parents=True, exist_ok=True)
+settings.SFX_DIR.mkdir(parents=True, exist_ok=True)
