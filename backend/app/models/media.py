@@ -11,3 +11,4 @@ class MediaAsset(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     thumbnailUrl: Optional[str] = None
+    speed: Optional[float] = 1.0

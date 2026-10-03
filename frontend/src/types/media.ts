@@ -8,4 +8,5 @@ export interface MediaAsset {
   width?: number;
   height?: number;
   thumbnailUrl?: string;
+  speed?: number;
 }

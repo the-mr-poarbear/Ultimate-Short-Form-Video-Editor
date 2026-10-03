@@ -1,4 +1,5 @@
 import os
+import math
 import subprocess
 from pathlib import Path
 from typing import Optional, List
@@ -29,6 +30,106 @@ class VideoRenderer:
         """Converts #RRGGBB into ASS &HAABBGGRR format."""
         raw = self.hex_to_ass_color_raw(hex_str)
         return f"&H{alpha}{raw}".upper()
+
+    def ensure_raster_image(self, file_path: Path, output_dir: Optional[Path] = None) -> Path:
+        """
+        If file_path is an SVG, converts it to a PNG file using resvg_py
+        because FFmpeg on Windows typically lacks an SVG decoder.
+        """
+        if file_path.suffix.lower() == ".svg":
+            target_dir = output_dir or file_path.parent
+            png_path = target_dir / f"{file_path.stem}_converted.png"
+            if not png_path.exists() or png_path.stat().st_mtime < file_path.stat().st_mtime:
+                try:
+                    import resvg_py
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        svg_content = f.read()
+                    png_bytes = resvg_py.svg_to_bytes(svg_content)
+                    with open(png_path, "wb") as f:
+                        f.write(png_bytes)
+                except Exception as e:
+                    print(f"[VideoRenderer] Warning: Failed to convert SVG to PNG ({file_path}): {e}")
+                    return file_path
+            if png_path.exists():
+                return png_path
+        return file_path
+
+    _cached_encoder_settings = None
+
+    @classmethod
+    def get_video_encoder_settings(cls) -> dict:
+        """
+        Detects GPU hardware encoders for high-speed exports.
+        Prioritizes:
+          1. NVIDIA NVENC (h264_nvenc) - Dedicated GPU chip on RTX / GTX cards
+          2. Intel QuickSync (h264_qsv) - Intel Iris Xe / UHD hardware encoder
+          3. AMD AMF (h264_amf)
+          Fallback: CPU libx264 with veryfast preset
+        """
+        if cls._cached_encoder_settings is not None:
+            return cls._cached_encoder_settings
+
+        # 1. Test NVIDIA NVENC
+        try:
+            res = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=black:s=192x192:d=0.1", "-c:v", "h264_nvenc", "-f", "null", "-"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3
+            )
+            if res.returncode == 0:
+                cls._cached_encoder_settings = {
+                    "type": "nvenc",
+                    "name": "NVIDIA NVENC (GPU Accelerated)",
+                    "args": ["-c:v", "h264_nvenc", "-preset", "p3", "-tune", "hq", "-rc:v", "vbr", "-cq", "21", "-b:v", "0", "-spatial-aq", "1"],
+                }
+                return cls._cached_encoder_settings
+        except Exception:
+            pass
+
+        # 2. Test Intel QuickSync (QSV)
+        try:
+            res = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=black:s=192x192:d=0.1", "-c:v", "h264_qsv", "-f", "null", "-"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3
+            )
+            if res.returncode == 0:
+                cls._cached_encoder_settings = {
+                    "type": "qsv",
+                    "name": "Intel QuickSync (GPU Accelerated)",
+                    "args": ["-c:v", "h264_qsv", "-preset", "veryfast", "-global_quality", "21"],
+                }
+                return cls._cached_encoder_settings
+        except Exception:
+            pass
+
+        # 3. Test AMD AMF
+        try:
+            res = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-y", "-f", "lavfi", "-i", "color=c=black:s=192x192:d=0.1", "-c:v", "h264_amf", "-f", "null", "-"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=3
+            )
+            if res.returncode == 0:
+                cls._cached_encoder_settings = {
+                    "type": "amf",
+                    "name": "AMD AMF (GPU Accelerated)",
+                    "args": ["-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_i", "21", "-qp_p", "21"],
+                }
+                return cls._cached_encoder_settings
+        except Exception:
+            pass
+
+        # 4. CPU Fallback
+        cls._cached_encoder_settings = {
+            "type": "cpu",
+            "name": "CPU (Multi-threaded libx264 veryfast)",
+            "args": ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"],
+        }
+        return cls._cached_encoder_settings
 
     def generate_ass_subtitles(self, project: Project, output_ass_path: Path) -> Path:
         """
@@ -168,12 +269,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 if bg_asset:
                     is_bg_image = (bg_asset.type == "image")
                 else:
-                    is_bg_image = bg_cand.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".bmp"]
+                    is_bg_image = bg_cand.suffix.lower() in [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".svg"]
 
         input_index = 1
         base_video_tag = "bg"
 
         if bg_media_path:
+            bg_media_path = self.ensure_raster_image(bg_media_path, renders_dir)
             if is_bg_image:
                 inputs.extend(["-loop", "1", "-i", str(bg_media_path)])
             else:
@@ -205,8 +307,40 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             asset_file = project_dir / "media" / Path(asset.path).name
             if not asset_file.exists():
                 continue
+            asset_file = self.ensure_raster_image(asset_file, renders_dir)
 
-            slice_dur = max(s.end - s.start, 0.1)
+            layout_style = getattr(s.visual, "layoutStyle", "fullscreen") or "fullscreen"
+
+            # Look up slice in the full timeline to accurately determine adjacent slice media status:
+            s_timeline_idx = sorted_slices.index(s)
+            is_first_slice = (s_timeline_idx == 0)
+            has_next_slice = (s_timeline_idx < len(sorted_slices) - 1)
+            next_slice = sorted_slices[s_timeline_idx + 1] if has_next_slice else None
+            next_has_visual = bool(next_slice and next_slice.visual and next_slice.visual.assetId)
+
+            # 1. Start at 0.0 only if this is the first slice on the timeline and starts near 0.0
+            eff_start = 0.0 if (is_first_slice and s.start <= 0.5) else s.start
+
+            # 2. Timing for the end of the slice:
+            # - If the next slice on the timeline ALSO has visual media:
+            #   Extend to next_slice.start with a 1-frame (0.04s) safety overlap buffer so consecutive
+            #   fullscreen media transitions seamlessly with zero background flash.
+            # - If the next slice has NO visual media (background image section):
+            #   End cleanly at the slice boundary with ZERO buffer so video never bleeds into the background image.
+            # - If this is the last slice on the timeline:
+            #   Extend to duration if this slice spans to the end, with zero buffer.
+            if has_next_slice:
+                if next_has_visual:
+                    eff_end = next_slice.start
+                    buffer = 0.04 if layout_style == "fullscreen" else 0.0
+                else:
+                    eff_end = min(s.end, next_slice.start) if s.end else next_slice.start
+                    buffer = 0.0
+            else:
+                eff_end = max(s.end, duration)
+                buffer = 0.0
+
+            slice_dur = max(eff_end - eff_start, 0.1)
             v_input_idx = input_index
             input_index += 1
 
@@ -220,7 +354,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     inputs.extend(["-stream_loop", "-1", "-i", str(asset_file)])
 
             tag_v = f"v_asset_{idx}"
-            layout_style = getattr(s.visual, "layoutStyle", "fullscreen") or "fullscreen"
             pos_x = getattr(s.visual, "positionX", 50.0) or 50.0
             pos_y = getattr(s.visual, "positionY", 50.0) or 50.0
             scale = getattr(s.visual, "scale", 1.0) or 1.0
@@ -229,6 +362,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             crop_x_pct = getattr(s.visual, "cropX", 0.0) or 0.0
             crop_y_pct = getattr(s.visual, "cropY", 0.0) or 0.0
             transition = getattr(s.visual, "transition", "none") or "none"
+            rotation = getattr(s.visual, "rotation", 0.0) or 0.0
+            speed = getattr(s.visual, "speed", 1.0) or 1.0
+            if speed <= 0:
+                speed = 1.0
 
             pan_coverage = getattr(s.visual, "panCoverage", 100.0) or 100.0
             cov_norm = max(0.2, min(1.0, pan_coverage / 100.0))
@@ -261,71 +398,103 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 overlay_x = 0
                 overlay_y = 0
 
+            has_rotation = abs(rotation) > 0.01
+
+            # In fullscreen mode with rotation (e.g. rotating horizontal media to vertical):
+            # Calculate the unrotated bounding box required so that rotating by rotation degrees
+            # fully covers the 1080x1920 canvas without square letterboxing or height clipping.
+            if layout_style == "fullscreen" and has_rotation:
+                rad = abs(rotation * math.pi / 180.0)
+                crop_box_w = int(math.ceil(win_w * abs(math.cos(rad)) + win_h * abs(math.sin(rad))))
+                crop_box_h = int(math.ceil(win_w * abs(math.sin(rad)) + win_h * abs(math.cos(rad))))
+                crop_box_w = (crop_box_w // 2) * 2
+                crop_box_h = (crop_box_h // 2) * 2
+            else:
+                crop_box_w = win_w
+                crop_box_h = win_h
+
             # Scaling with aspect ratio preservation
             if transition in ["pan-right", "pan-left", "pan-down", "pan-up"]:
                 effective_zoom = max(1.25, zoom)
             else:
                 effective_zoom = max(1.0, zoom)
 
-            z_w = (int(win_w * effective_zoom) // 2) * 2
-            z_h = (int(win_h * effective_zoom) // 2) * 2
+            z_w = (int(crop_box_w * effective_zoom) // 2) * 2
+            z_h = (int(crop_box_h * effective_zoom) // 2) * 2
 
-            # Dynamic pan / crop expressions
+            # Dynamic pan / crop expressions with clamped time to protect boundary buffers
             if transition == "pan-right":
-                x_expr = f"min(in_w-{win_w},(in_w-{win_w})*{cov_norm:.3f}*(t/{slice_dur:.3f}))"
-                y_expr = f"max(0,min(in_h-{win_h},(in_h-{win_h})*{(50.0 + crop_y_pct) / 100.0:.3f}))"
+                x_expr = f"min(in_w-{crop_box_w},(in_w-{crop_box_w})*{cov_norm:.3f}*min(1,t/{slice_dur:.3f}))"
+                y_expr = f"max(0,min(in_h-{crop_box_h},(in_h-{crop_box_h})*{(50.0 + crop_y_pct) / 100.0:.3f}))"
             elif transition == "pan-left":
-                x_expr = f"max(0,(in_w-{win_w})*{cov_norm:.3f}*(1.0-t/{slice_dur:.3f}))"
-                y_expr = f"max(0,min(in_h-{win_h},(in_h-{win_h})*{(50.0 + crop_y_pct) / 100.0:.3f}))"
+                x_expr = f"max(0,(in_w-{crop_box_w})*{cov_norm:.3f}*(1.0-min(1,t/{slice_dur:.3f})))"
+                y_expr = f"max(0,min(in_h-{crop_box_h},(in_h-{crop_box_h})*{(50.0 + crop_y_pct) / 100.0:.3f}))"
             elif transition == "pan-down":
-                x_expr = f"max(0,min(in_w-{win_w},(in_w-{win_w})*{(50.0 + crop_x_pct) / 100.0:.3f}))"
-                y_expr = f"min(in_h-{win_h},(in_h-{win_h})*{cov_norm:.3f}*(t/{slice_dur:.3f}))"
+                x_expr = f"max(0,min(in_w-{crop_box_w},(in_w-{crop_box_w})*{(50.0 + crop_x_pct) / 100.0:.3f}))"
+                y_expr = f"min(in_h-{crop_box_h},(in_h-{crop_box_h})*{cov_norm:.3f}*min(1,t/{slice_dur:.3f}))"
             elif transition == "pan-up":
-                x_expr = f"max(0,min(in_w-{win_w},(in_w-{win_w})*{(50.0 + crop_x_pct) / 100.0:.3f}))"
-                y_expr = f"max(0,(in_h-{win_h})*{cov_norm:.3f}*(1.0-t/{slice_dur:.3f}))"
+                x_expr = f"max(0,min(in_w-{crop_box_w},(in_w-{crop_box_w})*{(50.0 + crop_x_pct) / 100.0:.3f}))"
+                y_expr = f"max(0,(in_h-{crop_box_h})*{cov_norm:.3f}*(1.0-min(1,t/{slice_dur:.3f})))"
             else:
                 # Static / Zoom / Fade framing using cropX and cropY offset
-                x_expr = f"max(0,min(in_w-{win_w},(in_w-{win_w})*{(50.0 + crop_x_pct) / 100.0:.3f}))"
-                y_expr = f"max(0,min(in_h-{win_h},(in_h-{win_h})*{(50.0 + crop_y_pct) / 100.0:.3f}))"
+                x_expr = f"max(0,min(in_w-{crop_box_w},(in_w-{crop_box_w})*{(50.0 + crop_x_pct) / 100.0:.3f}))"
+                y_expr = f"max(0,min(in_h-{crop_box_h},(in_h-{crop_box_h})*{(50.0 + crop_y_pct) / 100.0:.3f}))"
 
             if fit == "contain":
                 scale_part = (
-                    f"scale=w='if(gt(a,{win_w}/{win_h}),{z_w},-2)':h='if(gt(a,{win_w}/{win_h}),-2,{z_h})':force_original_aspect_ratio=decrease:force_divisible_by=2,"
-                    f"pad=w='max(iw,{win_w})':h='max(ih,{win_h})':x='(ow-iw)/2':y='(oh-ih)/2':color=0x00000000"
+                    f"scale=w='if(gt(a,{crop_box_w}/{crop_box_h}),{z_w},-2)':h='if(gt(a,{crop_box_w}/{crop_box_h}),-2,{z_h})':force_original_aspect_ratio=decrease:force_divisible_by=2,"
+                    f"pad=w='max(iw,{crop_box_w})':h='max(ih,{crop_box_h})':x='(ow-iw)/2':y='(oh-ih)/2':color=0x00000000"
                 )
             else:
                 scale_part = f"scale={z_w}:{z_h}:force_original_aspect_ratio=increase:force_divisible_by=2"
 
-            base_filter = f"{scale_part},crop={win_w}:{win_h}:x='{x_expr}':y='{y_expr}',fps=30"
+            if asset.type == "video" and abs(speed - 1.0) > 0.01:
+                speed_filter = f"setpts=(1/{speed:.4f})*PTS,"
+            else:
+                speed_filter = ""
+
+            base_filter = f"{speed_filter}{scale_part},crop={crop_box_w}:{crop_box_h}:x='{x_expr}':y='{y_expr}',fps=30"
 
             if transition == "fade":
                 fade_d = min(0.35, slice_dur / 2.0)
-                fade_out_st = max(slice_dur - fade_d, 0.0)
                 v_filters = (
                     f"{base_filter},"
-                    f"fade=t=in:st=0:d={fade_d:.3f}:alpha=1,"
-                    f"fade=t=out:st={fade_out_st:.3f}:d={fade_d:.3f}:alpha=1,"
-                    f"format=yuva420p,trim=duration={slice_dur:.3f},setpts=PTS-STARTPTS+{s.start:.3f}/TB"
+                    f"fade=t=in:st=0:d={fade_d:.3f}:alpha=1"
                 )
             elif transition == "zoom-in":
                 v_filters = (
                     f"{base_filter},"
-                    f"scale=w='{win_w}*(1+0.12*t/{slice_dur:.3f})':h='{win_h}*(1+0.12*t/{slice_dur:.3f})':eval=frame,"
-                    f"crop={win_w}:{win_h},format=yuva420p,trim=duration={slice_dur:.3f},setpts=PTS-STARTPTS+{s.start:.3f}/TB"
+                    f"scale=w='{crop_box_w}*(1+0.12*min(1,t/{slice_dur:.3f}))':h='{crop_box_h}*(1+0.12*min(1,t/{slice_dur:.3f}))':eval=frame,"
+                    f"crop={crop_box_w}:{crop_box_h}"
                 )
             elif transition == "zoom-out":
                 v_filters = (
                     f"{base_filter},"
-                    f"scale=w='{win_w}*(1.12-0.12*t/{slice_dur:.3f})':h='{win_h}*(1.12-0.12*t/{slice_dur:.3f})':eval=frame,"
-                    f"crop={win_w}:{win_h},format=yuva420p,trim=duration={slice_dur:.3f},setpts=PTS-STARTPTS+{s.start:.3f}/TB"
+                    f"scale=w='max({crop_box_w},{crop_box_w}*(1.12-0.12*min(1,t/{slice_dur:.3f})))':h='max({crop_box_h},{crop_box_h}*(1.12-0.12*min(1,t/{slice_dur:.3f})))':eval=frame,"
+                    f"crop={crop_box_w}:{crop_box_h}"
                 )
             else:
-                v_filters = f"{base_filter},format=yuva420p,trim=duration={slice_dur:.3f},setpts=PTS-STARTPTS+{s.start:.3f}/TB"
+                v_filters = f"{base_filter}"
+
+            if has_rotation:
+                if layout_style == "fullscreen":
+                    v_filters += f",rotate={rotation:.2f}*PI/180:ow=1080:oh=1920:c=none"
+                else:
+                    v_filters += f",rotate={rotation:.2f}*PI/180:c=none:ow=rotw({rotation:.2f}*PI/180):oh=roth({rotation:.2f}*PI/180)"
+
+            v_filters += f",format=yuva420p,trim=duration={slice_dur + buffer:.3f},setpts=PTS-STARTPTS+{eff_start:.3f}/TB"
 
             filter_graphs.append(f"[{v_input_idx}:v]{v_filters}[{tag_v}];")
             next_canvas = f"canvas_{idx}"
+            if layout_style == "fullscreen":
+                overlay_coords = "0:0"
+            elif has_rotation:
+                overlay_coords = f"'(1080*{pos_x:.3f}/100.0)-w/2':'(1920*{pos_y:.3f}/100.0)-h/2'"
+            else:
+                overlay_coords = f"{overlay_x}:{overlay_y}"
+
             filter_graphs.append(
-                f"[{current_canvas}][{tag_v}]overlay={overlay_x}:{overlay_y}:enable='between(t,{s.start:.3f},{s.end:.3f})':eof_action=pass[{next_canvas}];"
+                f"[{current_canvas}][{tag_v}]overlay={overlay_coords}:enable='between(t,{eff_start:.3f},{eff_end + buffer:.3f})':eof_action=repeat[{next_canvas}];"
             )
             current_canvas = next_canvas
 
@@ -408,6 +577,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             if not ov_file or not ov_file.exists():
                 continue
+            ov_file = self.ensure_raster_image(ov_file, renders_dir)
 
             ov_input_idx = input_index
             input_index += 1
@@ -427,8 +597,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             pos_x = ov.positionX if ov.positionX is not None else 50.0
             pos_y = ov.positionY if ov.positionY is not None else 50.0
-            overlay_ox = int((1080 * pos_x / 100.0) - ov_w / 2)
-            overlay_oy = int((1920 * pos_y / 100.0) - ov_h / 2)
+            anim = getattr(ov, "animation", "none") or "none"
+            rot_base = getattr(ov, "rotation", 0.0) or 0.0
+
+            # Dynamic overlay coordinates for motion animations
+            if anim == "bounce":
+                overlay_x_expr = f"'(1080*{pos_x:.3f}/100.0)-w/2'"
+                overlay_y_expr = f"'(1920*{pos_y:.3f}/100.0)-h/2 - 48*abs(sin(PI*(t-{ov.start:.3f})/1.2))'"
+            elif anim == "slide-up":
+                overlay_x_expr = f"'(1080*{pos_x:.3f}/100.0)-w/2'"
+                overlay_y_expr = f"'(1920*{pos_y:.3f}/100.0)-h/2 - 72*(1-cos(2*PI*(t-{ov.start:.3f})/1.4))/2'"
+            elif anim == "slide-down":
+                overlay_x_expr = f"'(1080*{pos_x:.3f}/100.0)-w/2'"
+                overlay_y_expr = f"'(1920*{pos_y:.3f}/100.0)-h/2 + 72*(1-cos(2*PI*(t-{ov.start:.3f})/1.4))/2'"
+            elif anim == "slide-left":
+                overlay_x_expr = f"'(1080*{pos_x:.3f}/100.0)-w/2 - 72*(1-cos(2*PI*(t-{ov.start:.3f})/1.4))/2'"
+                overlay_y_expr = f"'(1920*{pos_y:.3f}/100.0)-h/2'"
+            elif anim == "slide-right":
+                overlay_x_expr = f"'(1080*{pos_x:.3f}/100.0)-w/2 + 72*(1-cos(2*PI*(t-{ov.start:.3f})/1.4))/2'"
+                overlay_y_expr = f"'(1920*{pos_y:.3f}/100.0)-h/2'"
+            else:
+                overlay_x_expr = f"'(1080*{pos_x:.3f}/100.0)-w/2'"
+                overlay_y_expr = f"'(1920*{pos_y:.3f}/100.0)-h/2'"
 
             ov_filters = (
                 f"scale={ov_w}:{ov_h}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
@@ -436,9 +626,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             )
             if getattr(ov, "flipX", False):
                 ov_filters += ",hflip"
-            if getattr(ov, "rotation", 0.0) and abs(ov.rotation) > 0.1:
-                ov_filters += f",rotate={ov.rotation:.2f}*PI/180:c=none:ow=rotw({ov.rotation:.2f}*PI/180):oh=roth({ov.rotation:.2f}*PI/180)"
-            if getattr(ov, "opacity", 1.0) and ov.opacity < 0.99:
+
+            # Dynamic scale animations (pulse, pop, glow)
+            if anim == "pulse":
+                ov_filters += f",scale=w='trunc({ov_w}*(1+0.12*sin(2*PI*t/1.4))/2)*2':h='trunc({ov_h}*(1+0.12*sin(2*PI*t/1.4))/2)*2':eval=frame"
+            elif anim == "pop":
+                ov_filters += f",scale=w='trunc({ov_w}*(1+0.20*sin(2*PI*t/1.0))/2)*2':h='trunc({ov_h}*(1+0.20*sin(2*PI*t/1.0))/2)*2':eval=frame"
+            elif anim == "glow":
+                ov_filters += f",scale=w='trunc({ov_w}*(1+0.08*sin(2*PI*t/1.5))/2)*2':h='trunc({ov_h}*(1+0.08*sin(2*PI*t/1.5))/2)*2':eval=frame"
+
+            # Rotation (spin, wiggle, or static)
+            if anim == "spin":
+                ov_filters += f",rotate=a='({rot_base:.2f} + 360*t/3.0)*PI/180':c=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'"
+            elif anim == "wiggle":
+                ov_filters += f",rotate=a='({rot_base:.2f} + 10*sin(2*PI*t/0.8))*PI/180':c=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'"
+            elif abs(rot_base) > 0.1:
+                ov_filters += f",rotate={rot_base:.2f}*PI/180:c=none:ow=rotw({rot_base:.2f}*PI/180):oh=roth({rot_base:.2f}*PI/180)"
+
+            # Opacity (fade animation or static opacity)
+            if anim == "fade":
+                ov_filters += f",format=yuva420p,geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='alpha(X,Y)*(0.65+0.35*cos(2*PI*T/1.6))'"
+            elif getattr(ov, "opacity", 1.0) and ov.opacity < 0.99:
                 ov_filters += f",colorchannelmixer=aa={ov.opacity:.2f}"
 
             ov_filters += f",format=yuva420p,trim=duration={ov_dur:.3f},setpts=PTS-STARTPTS+{ov.start:.3f}/TB"
@@ -446,7 +654,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             filter_graphs.append(f"[{ov_input_idx}:v]{ov_filters}[{tag_ov}];")
             next_ov_canvas = f"ov_canvas_{ov_idx}"
             filter_graphs.append(
-                f"[{current_canvas}][{tag_ov}]overlay={overlay_ox}:{overlay_oy}:enable='between(t,{ov.start:.3f},{ov.end:.3f})':eof_action=pass[{next_ov_canvas}];"
+                f"[{current_canvas}][{tag_ov}]overlay={overlay_x_expr}:{overlay_y_expr}:enable='between(t,{ov.start:.3f},{ov.end:.3f})':eof_action=pass[{next_ov_canvas}];"
             )
             current_canvas = next_ov_canvas
 
@@ -537,15 +745,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         full_filter = "".join(filter_graphs)
 
+        encoder_info = self.get_video_encoder_settings()
+        print(f"[VideoRenderer] Exporting using encoder: {encoder_info['name']}")
+
+        if job_id:
+            job_service.update_progress(job_id, 45, f"Exporting 1080x1920 MP4 via {encoder_info['name']}...")
+
         cmd = [
             "ffmpeg", "-y",
+            "-threads", "0",
             *inputs,
             "-filter_complex", full_filter,
+            "-sws_flags", "fast_bilinear",
             "-map", "[outv]",
             "-map", audio_map_tag,
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "20",
+            *encoder_info["args"],
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-b:a", "192k",
@@ -553,32 +767,52 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             str(output_mp4)
         ]
 
-        if job_id:
-            job_service.update_progress(job_id, 45, "Encoding 1080x1920 30FPS MP4...")
-
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if res.returncode != 0:
-            print(f"[VideoRenderer] FFmpeg stderr: {res.stderr}")
-            # Fallback if subtitles filter had path issues: render without subtitles filter
-            if "subtitles" in full_filter:
-                alt_filter = full_filter.replace(f"subtitles='{escaped_ass}'", "null")
-                alt_cmd = [
+            print(f"[VideoRenderer] Primary encoder ({encoder_info['name']}) failed: {res.stderr}")
+            cpu_args = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "21"]
+            if encoder_info["type"] != "cpu":
+                print("[VideoRenderer] Retrying with CPU fallback...")
+                if job_id:
+                    job_service.update_progress(job_id, 50, "Retrying with CPU encoder fallback...")
+                fallback_cmd = [
                     "ffmpeg", "-y",
+                    "-threads", "0",
                     *inputs,
-                    "-filter_complex", alt_filter,
+                    "-filter_complex", full_filter,
+                    "-sws_flags", "fast_bilinear",
                     "-map", "[outv]",
                     "-map", audio_map_tag,
-                    "-c:v", "libx264",
-                    "-preset", "fast",
-                    "-crf", "20",
+                    *cpu_args,
                     "-pix_fmt", "yuv420p",
                     "-c:a", "aac",
                     "-b:a", "192k",
                     "-shortest",
                     str(output_mp4)
                 ]
-                subprocess.run(alt_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-            else:
+                res = subprocess.run(fallback_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            # Fallback 2: if subtitles filter had path issues: render without subtitles filter
+            if res.returncode != 0 and "subtitles" in full_filter:
+                print("[VideoRenderer] Retrying without subtitles filter...")
+                alt_filter = full_filter.replace(f"subtitles='{escaped_ass}'", "null")
+                alt_cmd = [
+                    "ffmpeg", "-y",
+                    "-threads", "0",
+                    *inputs,
+                    "-filter_complex", alt_filter,
+                    "-sws_flags", "fast_bilinear",
+                    "-map", "[outv]",
+                    "-map", audio_map_tag,
+                    *cpu_args,
+                    "-pix_fmt", "yuv420p",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-shortest",
+                    str(output_mp4)
+                ]
+                res = subprocess.run(alt_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            elif res.returncode != 0:
                 raise RuntimeError(f"FFmpeg render failed: {res.stderr[-500:]}")
 
         if job_id:

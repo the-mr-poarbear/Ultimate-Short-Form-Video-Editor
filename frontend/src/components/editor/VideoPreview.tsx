@@ -3,7 +3,7 @@ import { useEditorStore } from "../../stores/editorStore";
 import { useCharacterStore } from "../../stores/characterStore";
 import { getMediaUrl } from "../../services/api";
 import { CaptionPreview } from "../captions/CaptionPreview";
-import { Move, Maximize2 } from "lucide-react";
+import { Move, Maximize2, RotateCw } from "lucide-react";
 import type { Slice, TimelineOverlay } from "../../types/project";
 import type { MediaAsset } from "../../types/media";
 
@@ -25,6 +25,7 @@ interface SliceVisualItemProps {
   effectiveDuration: number;
   onWindowMouseDown?: (e: React.MouseEvent) => void;
   onResizeMouseDown?: (e: React.MouseEvent, handle: ResizeHandle) => void;
+  onRotateMouseDown?: (e: React.MouseEvent) => void;
   onFullscreenMouseDown?: (e: React.MouseEvent) => void;
   onWheelZoom?: (e: React.WheelEvent) => void;
 }
@@ -40,11 +41,14 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
   effectiveDuration,
   onWindowMouseDown,
   onResizeMouseDown,
+  onRotateMouseDown,
   onFullscreenMouseDown,
   onWheelZoom,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const visual = slice.visual;
+  const rotation = visual?.rotation ?? 0;
+  const speed = visual?.speed && visual.speed > 0 ? visual.speed : 1.0;
   const isSeekingRef = useRef<boolean>(false);
   const pendingSeekTimeRef = useRef<number | null>(null);
   const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -108,25 +112,41 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
     }
   }, [asset?.id]);
 
+  // Sync playback rate with speed modifier
+  useEffect(() => {
+    const vid = videoRef.current;
+    if (!vid || asset?.type !== "video") return;
+    try {
+      if (vid.playbackRate !== speed) {
+        vid.playbackRate = speed;
+      }
+    } catch {}
+  }, [speed, asset?.id]);
+
   // Initial sync if video metadata is already loaded from cache on mount
   useEffect(() => {
     const vid = videoRef.current;
     if (!vid || asset?.type !== "video") return;
     vid.muted = true;
     vid.defaultMuted = true;
+    try {
+      if (vid.playbackRate !== speed) {
+        vid.playbackRate = speed;
+      }
+    } catch {}
     if (vid.readyState >= 1 && vid.duration && isFinite(vid.duration)) {
       if (asset?.id && (!asset.duration || asset.duration <= 0)) {
         useEditorStore.getState().updateMediaAssetDuration(asset.id, vid.duration);
       }
       const mediaStart = visual?.mediaStart || 0.0;
       const sliceOffset = Math.max(0, currentTime - slice.start);
-      const targetTime = (mediaStart + sliceOffset) % vid.duration;
+      const targetTime = (mediaStart + sliceOffset * speed) % vid.duration;
       requestSeek(targetTime);
       if (isPlaying && vid.paused) {
         vid.play().catch(() => {});
       }
     }
-  }, [asset?.id, isPlaying, slice.start, visual?.mediaStart, requestSeek]);
+  }, [asset?.id, isPlaying, slice.start, visual?.mediaStart, speed, requestSeek]);
 
   // Sync play / pause
   useEffect(() => {
@@ -146,9 +166,15 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
     const vid = videoRef.current;
     if (!vid || asset?.type !== "video" || !vid.duration || !isFinite(vid.duration)) return;
 
+    try {
+      if (vid.playbackRate !== speed) {
+        vid.playbackRate = speed;
+      }
+    } catch {}
+
     const mediaStart = visual?.mediaStart || 0.0;
     const sliceOffset = Math.max(0, currentTime - slice.start);
-    const targetTime = (mediaStart + sliceOffset) % vid.duration;
+    const targetTime = (mediaStart + sliceOffset * speed) % vid.duration;
 
     if (!isFinite(targetTime) || isNaN(targetTime)) return;
 
@@ -162,7 +188,7 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
         vid.play().catch(() => {});
       }
     }
-  }, [currentTime, isPlaying, slice.id, asset?.id, visual?.mediaStart, requestSeek]);
+  }, [currentTime, isPlaying, slice.id, asset?.id, visual?.mediaStart, speed, requestSeek]);
 
   const handleLoaded = useCallback(
     (e: React.SyntheticEvent<HTMLVideoElement>) => {
@@ -170,18 +196,23 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
       if (!vid || !vid.duration || !isFinite(vid.duration)) return;
       vid.muted = true;
       vid.defaultMuted = true;
+      try {
+        if (vid.playbackRate !== speed) {
+          vid.playbackRate = speed;
+        }
+      } catch {}
       if (asset?.id && (!asset.duration || asset.duration <= 0)) {
         useEditorStore.getState().updateMediaAssetDuration(asset.id, vid.duration);
       }
       const mediaStart = visual?.mediaStart || 0.0;
       const sliceOffset = Math.max(0, currentTime - slice.start);
-      const targetTime = (mediaStart + sliceOffset) % vid.duration;
+      const targetTime = (mediaStart + sliceOffset * speed) % vid.duration;
       requestSeek(targetTime);
       if (isPlaying && vid.paused) {
         vid.play().catch(() => {});
       }
     },
-    [asset?.id, asset?.duration, slice.start, visual?.mediaStart, currentTime, isPlaying, requestSeek]
+    [asset?.id, asset?.duration, slice.start, visual?.mediaStart, speed, currentTime, isPlaying, requestSeek]
   );
 
   useEffect(() => {
@@ -265,7 +296,8 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
           top: `${positionY}%`,
           width: `${width}%`,
           height: `${height}%`,
-          transform: "translate(-50%, -50%)",
+          transform: rotation ? `translate(-50%, -50%) rotate(${rotation}deg)` : "translate(-50%, -50%)",
+          transformOrigin: "center center",
           borderRadius: `${borderRadius}px`,
           border:
             borderWidth > 0
@@ -347,8 +379,35 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
         </div>
 
         {isInteractive && isSliceSettingsOpen && (
-          <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-black/90 text-cyan-400 border border-cyan-400/40 text-[9px] font-mono px-2 py-0.5 rounded shadow-lg whitespace-nowrap pointer-events-none z-30">
-            {Math.round(width)}% × {Math.round(height)}% • {((width / height) * (1080 / 1920)).toFixed(2)}:1
+          <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-black/90 text-cyan-400 border border-cyan-400/40 text-[9px] font-mono px-2 py-0.5 rounded shadow-lg whitespace-nowrap pointer-events-none z-30 flex items-center gap-1">
+            <span>{Math.round(width)}% × {Math.round(height)}%</span>
+            <span className="text-muted-foreground">•</span>
+            <span>{((width / height) * (1080 / 1920)).toFixed(2)}:1</span>
+            {Math.round(rotation) !== 0 && (
+              <>
+                <span className="text-muted-foreground">•</span>
+                <span className="text-cyan-300 font-bold">{Math.round(rotation)}°</span>
+              </>
+            )}
+            {asset.type === "video" && Math.abs(speed - 1.0) > 0.01 && (
+              <>
+                <span className="text-muted-foreground">•</span>
+                <span className="text-indigo-300 font-bold">{speed.toFixed(2)}x</span>
+              </>
+            )}
+          </div>
+        )}
+
+        {isInteractive && isSliceSettingsOpen && (
+          <div
+            onMouseDown={onRotateMouseDown}
+            className="absolute -top-12 left-1/2 -translate-x-1/2 flex flex-col items-center cursor-grab active:cursor-grabbing z-40 group/rot select-none"
+            title="Drag to rotate slice window (Hold Shift to snap to 15°)"
+          >
+            <div className="w-5 h-5 rounded-full bg-cyan-500 border border-white text-black shadow-lg flex items-center justify-center hover:scale-125 transition-transform">
+              <RotateCw className="w-3 h-3 group-hover/rot:rotate-45 transition-transform" />
+            </div>
+            <div className="w-0.5 h-6 bg-cyan-400/80" />
           </div>
         )}
 
@@ -409,6 +468,9 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
   }
 
   // Fullscreen layout
+  const isFade = transition === "fade";
+  const isZoom = transition === "zoom-in" || transition === "zoom-out";
+
   return (
     <div
       onMouseDown={isInteractive ? onFullscreenMouseDown : undefined}
@@ -420,60 +482,74 @@ const SliceVisualItem: React.FC<SliceVisualItemProps> = ({
         height: "100%",
         overflow: "hidden",
         zIndex,
-        ...transitionStyle,
+        ...(isFade ? transitionStyle : {}),
       }}
       className={`flex items-center justify-center select-none ${
         !isInteractive ? "pointer-events-none" : ""
       } ${isInteractive && isSliceSettingsOpen ? "cursor-move" : ""}`}
     >
-      {asset.type === "image" ? (
-        <img
-          src={getMediaUrl(asset.url)}
-          alt={asset.name}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: visual?.fit === "contain" ? "contain" : "cover",
-            objectPosition: `${currentObjX}% ${currentObjY}%`,
-            transform: `scale(${effectiveZoom})`,
-            transformOrigin: `${currentObjX}% ${currentObjY}%`,
-          }}
-          className="pointer-events-none select-none transition-transform duration-75"
-        />
-      ) : (
-        <video
-          ref={videoRef}
-          src={getMediaUrl(asset.url)}
-          muted
-          loop
-          playsInline
-          autoPlay={isPlaying}
-          preload="metadata"
-          onLoadedMetadata={handleLoaded}
-          onCanPlay={handleLoaded}
-          onLoadedData={handleLoaded}
-          onSeeked={handleSeeked}
-          onError={() => {
-            const vid = videoRef.current;
-            if (vid) { try { vid.load(); } catch {} }
-          }}
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: visual?.fit === "contain" ? "contain" : "cover",
-            objectPosition: `${currentObjX}% ${currentObjY}%`,
-            transform: `scale(${effectiveZoom})`,
-            transformOrigin: `${currentObjX}% ${currentObjY}%`,
-          }}
-          className="pointer-events-none select-none transition-transform duration-75"
-        />
-      )}
+      <div
+        style={{
+          width: "100%",
+          height: "100%",
+          position: "relative",
+          transform: rotation ? `rotate(${rotation}deg)` : undefined,
+          transformOrigin: "center center",
+          ...(isZoom ? transitionStyle : {}),
+        }}
+        className="w-full h-full flex items-center justify-center"
+      >
+        {asset.type === "image" ? (
+          <img
+            src={getMediaUrl(asset.url)}
+            alt={asset.name}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: visual?.fit === "contain" ? "contain" : "cover",
+              objectPosition: `${currentObjX}% ${currentObjY}%`,
+              transform: `scale(${effectiveZoom})`,
+              transformOrigin: `${currentObjX}% ${currentObjY}%`,
+            }}
+            className="pointer-events-none select-none transition-transform duration-75"
+          />
+        ) : (
+          <video
+            ref={videoRef}
+            src={getMediaUrl(asset.url)}
+            muted
+            loop
+            playsInline
+            autoPlay={isPlaying}
+            preload="metadata"
+            onLoadedMetadata={handleLoaded}
+            onCanPlay={handleLoaded}
+            onLoadedData={handleLoaded}
+            onSeeked={handleSeeked}
+            onError={() => {
+              const vid = videoRef.current;
+              if (vid) { try { vid.load(); } catch {} }
+            }}
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: visual?.fit === "contain" ? "contain" : "cover",
+              objectPosition: `${currentObjX}% ${currentObjY}%`,
+              transform: `scale(${effectiveZoom})`,
+              transformOrigin: `${currentObjX}% ${currentObjY}%`,
+            }}
+            className="pointer-events-none select-none transition-transform duration-75"
+          />
+        )}
+      </div>
 
       {isInteractive && isSliceSettingsOpen && (
         <div className="absolute top-3 left-3 bg-black/80 backdrop-blur-xs border border-primary/40 px-2.5 py-1 rounded text-[10px] text-primary flex items-center gap-1.5 pointer-events-none shadow-lg z-20">
           <Maximize2 className="w-3 h-3 text-cyan-400" />
           <span>
             Full Screen • Drag to pan subject ({Math.round(cropX)}%, {Math.round(cropY)}%) • Scroll to zoom
+            {Math.round(rotation) !== 0 && ` • Rotation: ${Math.round(rotation)}°`}
+            {asset.type === "video" && Math.abs(speed - 1.0) > 0.01 && ` • Speed: ${speed.toFixed(2)}x`}
           </span>
         </div>
       )}
@@ -796,6 +872,50 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
       window.addEventListener("mouseup", onMouseUp);
     },
     [isSliceSettingsOpen, activeSlice, layoutStyle, width, height, positionX, positionY, updateSliceVisual]
+  );
+
+  // Interactive slice rotation handle
+  const handleRotateMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isSliceSettingsOpen || !activeSlice) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      useEditorStore.getState().beginBatch();
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const centerX = rect.left + (rect.width * positionX) / 100;
+      const centerY = rect.top + (rect.height * positionY) / 100;
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        const dx = moveEvent.clientX - centerX;
+        const dy = moveEvent.clientY - centerY;
+        let angle = Math.round(Math.atan2(dy, dx) * (180 / Math.PI)) + 90;
+        while (angle > 180) angle -= 360;
+        while (angle < -180) angle += 360;
+
+        if (moveEvent.shiftKey) {
+          angle = Math.round(angle / 15) * 15;
+        }
+
+        updateSliceVisual(activeSlice.id, {
+          rotation: angle,
+        });
+      };
+
+      const onMouseUp = () => {
+        useEditorStore.getState().endBatch();
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
+      };
+
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    },
+    [isSliceSettingsOpen, activeSlice, positionX, positionY, updateSliceVisual]
   );
 
   // Direct canvas pan/crop handler for Fullscreen mode
@@ -1144,6 +1264,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
             effectiveDuration={sliceDur}
             onWindowMouseDown={handleWindowMouseDown}
             onResizeMouseDown={handleResizeMouseDown}
+            onRotateMouseDown={handleRotateMouseDown}
             onFullscreenMouseDown={handleFullscreenMouseDown}
             onWheelZoom={handleWheelZoom}
           />

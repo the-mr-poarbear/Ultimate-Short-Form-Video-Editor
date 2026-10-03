@@ -30,6 +30,9 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  RotateCw,
+  RotateCcw,
+  Gauge,
 } from "lucide-react";
 
 const TRANSITIONS: { value: VisualTransition; label: string; desc: string }[] = [
@@ -155,6 +158,8 @@ export const SliceSettingsPanel: React.FC = () => {
   const positionX = visual?.positionX ?? 50;
   const positionY = visual?.positionY ?? 50;
   const scale = visual?.scale ?? 1.0;
+  const rotation = visual?.rotation ?? 0;
+  const speed = visual?.speed ?? 1.0;
   const width = visual?.width ?? 75;
   const height = visual?.height ?? (assignedAsset?.type === "video" ? 25 : 39);
   const zoom = visual?.zoom ?? 1.0;
@@ -599,6 +604,109 @@ export const SliceSettingsPanel: React.FC = () => {
                 onChange={(val) => patchVisual({ positionY: val })}
               />
 
+              {/* Window Rotation */}
+              <div className="flex flex-col gap-1.5 pt-1 border-t border-border/50">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-muted-foreground font-medium flex items-center gap-1.5">
+                    <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Rotation Angle</span>
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-[11px] text-cyan-400 font-bold">
+                      {Math.round(rotation)}°
+                    </span>
+                    {Math.round(rotation) !== 0 && (
+                      <button
+                        type="button"
+                        onClick={() => patchVisual({ rotation: 0 })}
+                        className="text-[9px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <Slider
+                  label="Rotation Angle"
+                  value={Math.round(rotation)}
+                  min={-180}
+                  max={180}
+                  step={1}
+                  unit="°"
+                  onChange={(val) => patchVisual({ rotation: val })}
+                />
+
+                <div className="grid grid-cols-6 gap-1 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let next = Math.round(rotation) - 90;
+                      while (next < -180) next += 360;
+                      patchVisual({ rotation: next });
+                    }}
+                    className="py-1 rounded bg-surface hover:bg-surface-hover text-foreground font-mono text-[10px] border border-border/60 cursor-pointer flex items-center justify-center gap-0.5"
+                    title="Rotate 90° CCW"
+                  >
+                    <RotateCcw className="w-2.5 h-2.5 text-cyan-400" />
+                    <span>-90°</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => patchVisual({ rotation: -15 })}
+                    className={`py-1 rounded font-mono text-[10px] border border-border/60 cursor-pointer ${
+                      Math.round(rotation) === -15 ? "bg-cyan-500 text-black font-bold" : "bg-surface hover:bg-surface-hover text-foreground"
+                    }`}
+                    title="Tilt -15°"
+                  >
+                    -15°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => patchVisual({ rotation: 0 })}
+                    className={`py-1 rounded font-mono text-[10px] border border-border/60 cursor-pointer ${
+                      Math.round(rotation) === 0 ? "bg-cyan-500 text-black font-bold" : "bg-surface hover:bg-surface-hover text-foreground"
+                    }`}
+                    title="Reset 0° Level"
+                  >
+                    0°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => patchVisual({ rotation: 15 })}
+                    className={`py-1 rounded font-mono text-[10px] border border-border/60 cursor-pointer ${
+                      Math.round(rotation) === 15 ? "bg-cyan-500 text-black font-bold" : "bg-surface hover:bg-surface-hover text-foreground"
+                    }`}
+                    title="Tilt +15°"
+                  >
+                    +15°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let next = Math.round(rotation) + 90;
+                      while (next > 180) next -= 360;
+                      patchVisual({ rotation: next });
+                    }}
+                    className="py-1 rounded bg-surface hover:bg-surface-hover text-foreground font-mono text-[10px] border border-border/60 cursor-pointer flex items-center justify-center gap-0.5"
+                    title="Rotate 90° CW"
+                  >
+                    <RotateCw className="w-2.5 h-2.5 text-cyan-400" />
+                    <span>+90°</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => patchVisual({ rotation: 180 })}
+                    className={`py-1 rounded font-mono text-[10px] border border-border/60 cursor-pointer ${
+                      Math.abs(Math.round(rotation)) === 180 ? "bg-cyan-500 text-black font-bold" : "bg-surface hover:bg-surface-hover text-foreground"
+                    }`}
+                    title="Invert 180°"
+                  >
+                    180°
+                  </button>
+                </div>
+              </div>
+
               {/* Window Borders & Corner Radius */}
               <div className="h-[1px] bg-border/60 my-0.5" />
 
@@ -735,6 +843,92 @@ export const SliceSettingsPanel: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {/* Fullscreen Media Rotation & Orientation */}
+            {layoutStyle === "fullscreen" && (
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-border/50">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-muted-foreground font-medium flex items-center gap-1.5">
+                    <RotateCw className="w-3.5 h-3.5 text-primary" />
+                    <span>Media Orientation & Rotation</span>
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-[11px] text-primary font-bold">
+                      {Math.round(rotation)}°
+                    </span>
+                    {Math.round(rotation) !== 0 && (
+                      <button
+                        type="button"
+                        onClick={() => patchVisual({ rotation: 0 })}
+                        className="text-[9px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <Slider
+                  label="Rotation Angle"
+                  value={Math.round(rotation)}
+                  min={-180}
+                  max={180}
+                  step={1}
+                  unit="°"
+                  onChange={(val) => patchVisual({ rotation: val })}
+                />
+
+                {/* Quick 90 deg turn buttons */}
+                <div className="grid grid-cols-4 gap-1 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let next = Math.round(rotation) - 90;
+                      while (next < -180) next += 360;
+                      patchVisual({ rotation: next });
+                    }}
+                    className="py-1 rounded bg-surface hover:bg-surface-hover text-foreground font-mono text-[10px] border border-border/60 cursor-pointer flex items-center justify-center gap-1"
+                    title="Rotate 90° CCW"
+                  >
+                    <RotateCcw className="w-3 h-3 text-primary" />
+                    <span>-90°</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => patchVisual({ rotation: 0 })}
+                    className={`py-1 rounded font-mono text-[10px] border border-border/60 cursor-pointer ${
+                      Math.round(rotation) === 0 ? "bg-primary text-primary-foreground font-bold" : "bg-surface hover:bg-surface-hover text-foreground"
+                    }`}
+                    title="Reset 0° Level"
+                  >
+                    0°
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      let next = Math.round(rotation) + 90;
+                      while (next > 180) next -= 360;
+                      patchVisual({ rotation: next });
+                    }}
+                    className="py-1 rounded bg-surface hover:bg-surface-hover text-foreground font-mono text-[10px] border border-border/60 cursor-pointer flex items-center justify-center gap-1"
+                    title="Rotate 90° CW"
+                  >
+                    <RotateCw className="w-3 h-3 text-primary" />
+                    <span>+90°</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => patchVisual({ rotation: 180 })}
+                    className={`py-1 rounded font-mono text-[10px] border border-border/60 cursor-pointer ${
+                      Math.abs(Math.round(rotation)) === 180 ? "bg-primary text-primary-foreground font-bold" : "bg-surface hover:bg-surface-hover text-foreground"
+                    }`}
+                    title="Invert 180°"
+                  >
+                    180°
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Section 4: Video Start Time Offset (Only for Video assets) */}
@@ -815,6 +1009,75 @@ export const SliceSettingsPanel: React.FC = () => {
                     {formatButtonLabel(t)}
                   </button>
                 ))}
+              </div>
+
+              {/* Playback Speed Modifier */}
+              <div className="h-[1px] bg-border/60 my-1" />
+
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-foreground text-xs flex items-center gap-1.5">
+                    <Gauge className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Playback Speed Modifier</span>
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-xs text-indigo-400 font-bold">
+                      {speed.toFixed(2)}x
+                    </span>
+                    {Math.abs(speed - 1.0) > 0.01 && (
+                      <button
+                        type="button"
+                        onClick={() => patchVisual({ speed: 1.0 })}
+                        className="text-[9px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+                      >
+                        Reset 1.0x
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-muted-foreground">
+                  Slow-down or speed-up video playback for this slice (0.25x slow-mo to 4.0x fast-forward).
+                </p>
+
+                <Slider
+                  label="Speed Rate"
+                  value={Math.round(speed * 100) / 100}
+                  min={0.25}
+                  max={4.0}
+                  step={0.05}
+                  unit="x"
+                  valueDisplay={`${speed.toFixed(2)}x`}
+                  onChange={(val) => patchVisual({ speed: Math.max(0.2, Math.min(5.0, Math.round(val * 100) / 100)) })}
+                />
+
+                {/* Speed Presets */}
+                <div className="grid grid-cols-4 gap-1 pt-0.5">
+                  {[
+                    { label: "0.25x", val: 0.25, title: "0.25x Slow Motion" },
+                    { label: "0.5x", val: 0.5, title: "0.5x Half Speed" },
+                    { label: "0.75x", val: 0.75, title: "0.75x Gentle Slow-Mo" },
+                    { label: "1.0x", val: 1.0, title: "1.0x Normal Speed" },
+                    { label: "1.25x", val: 1.25, title: "1.25x Brisk" },
+                    { label: "1.5x", val: 1.5, title: "1.5x Fast" },
+                    { label: "2.0x", val: 2.0, title: "2.0x Double Speed" },
+                    { label: "3.0x", val: 3.0, title: "3.0x Triple Speed" },
+                  ].map((p) => (
+                    <button
+                      key={p.val}
+                      type="button"
+                      onClick={() => patchVisual({ speed: p.val })}
+                      title={p.title}
+                      className={`py-1 rounded text-[10px] font-mono cursor-pointer transition-colors ${
+                        Math.abs(speed - p.val) < 0.02
+                          ? "bg-indigo-500 text-white font-bold"
+                          : "bg-surface hover:bg-surface-hover text-muted-foreground hover:text-foreground border border-border/50"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           )}

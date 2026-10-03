@@ -138,6 +138,35 @@ function pushHistory(
   };
 }
 
+export function healSliceBoundaries(slices: Slice[] | undefined, totalDuration?: number): Slice[] {
+  if (!slices || slices.length === 0) return [];
+  const sorted = slices.map((s) => ({ ...s })).sort((a, b) => a.start - b.start);
+
+  // Ensure first slice starts at 0.0
+  if (sorted[0].start > 0.05) {
+    sorted[0].start = 0;
+  }
+
+  // Ensure every slice touches the next slice without gaps
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const curr = sorted[i];
+    const nxt = sorted[i + 1];
+    if (Math.abs(curr.end - nxt.start) > 0.001) {
+      curr.end = nxt.start;
+    }
+  }
+
+  // Ensure last slice covers up to totalDuration
+  if (totalDuration && totalDuration > 0) {
+    const last = sorted[sorted.length - 1];
+    if (last.end < totalDuration - 0.1) {
+      last.end = Math.round(totalDuration * 100) / 100;
+    }
+  }
+
+  return sorted;
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   project: null,
   currentTime: 0,
@@ -265,9 +294,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     batchSnapshot = null;
     set((state) => {
       const isNewProj = !state.project || (project && project.id !== state.project.id);
+      const healedProject = project
+        ? {
+            ...project,
+            slices: healSliceBoundaries(project.slices, project.duration),
+          }
+        : null;
       return {
-        project,
-        duration: project?.duration || 0,
+        project: healedProject,
+        duration: healedProject?.duration || 0,
         past: clearHistory || isNewProj ? [] : state.past,
         future: clearHistory || isNewProj ? [] : state.future,
         isDirty: clearHistory || isNewProj ? false : state.isDirty,
@@ -380,6 +415,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
                     type,
                     fit: "cover",
                     transition: s.visual?.transition || "none",
+                    rotation: s.visual?.rotation ?? 0,
+                    speed: s.visual?.speed ?? 1.0,
                   },
                 }
               : s
@@ -768,8 +805,16 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       if (sliceWords.length > 1) {
         const wordsBefore = sliceWords.filter((w) => w.end <= targetTime + 0.02).map((w) => w.word).join(" ");
         const wordsAfter = sliceWords.filter((w) => w.start >= targetTime - 0.02).map((w) => w.word).join(" ");
-        if (wordsBefore) textA = wordsBefore;
-        if (wordsAfter) textB = wordsAfter;
+        if (wordsBefore && wordsAfter) {
+          textA = wordsBefore;
+          textB = wordsAfter;
+        } else if (wordsBefore && !wordsAfter) {
+          textA = wordsBefore;
+          textB = targetSlice.text ? `${targetSlice.text} (Break)` : "(Break)";
+        } else if (!wordsBefore && wordsAfter) {
+          textA = targetSlice.text ? `${targetSlice.text} (Intro)` : "(Intro)";
+          textB = wordsAfter;
+        }
       }
 
       const idA = `${targetSlice.id}-a`;
@@ -878,12 +923,34 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((state) => {
       if (!state.project) return state;
       const hist = pushHistory(state);
-      const newSlices = state.project.slices.filter((s) => s.id !== sliceId);
+      const slices = [...state.project.slices].sort((a, b) => a.start - b.start);
+      const targetIndex = slices.findIndex((s) => s.id === sliceId);
+      if (targetIndex === -1) return state;
+
+      const targetSlice = slices[targetIndex];
+      const newSlices = slices.filter((s) => s.id !== sliceId);
+
+      if (newSlices.length > 0) {
+        if (targetIndex > 0) {
+          // Seamlessly expand previous slice to cover the deleted slice's time
+          const prevSlice = newSlices[targetIndex - 1];
+          prevSlice.end = targetSlice.end;
+          if (targetSlice.text && !prevSlice.text.includes(targetSlice.text)) {
+            prevSlice.text = `${prevSlice.text} ${targetSlice.text}`.trim();
+          }
+        } else {
+          // If first slice was deleted, expand new first slice backwards to start
+          newSlices[0].start = targetSlice.start;
+        }
+      }
+
+      const healedSlices = healSliceBoundaries(newSlices, state.project.duration);
+
       return {
         ...hist,
         project: {
           ...state.project,
-          slices: newSlices,
+          slices: healedSlices,
         },
         selectedSliceId: state.selectedSliceId === sliceId ? null : state.selectedSliceId,
       };

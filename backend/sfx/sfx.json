@@ -1,5 +1,14 @@
 [
   {
+    "id": "4df4057e",
+    "name": "camera 13695",
+    "category": "pop",
+    "url": "/sfx_media/assets/4df4057e.mp3",
+    "duration": 0.418,
+    "isPreset": false,
+    "createdAt": "2026-10-02T21:19:56.764259+00:00"
+  },
+  {
     "id": "sfx-whoosh-fast",
     "name": "Fast Whoosh",
     "category": "whoosh",

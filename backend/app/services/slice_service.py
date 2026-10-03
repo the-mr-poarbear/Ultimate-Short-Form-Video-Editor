@@ -169,8 +169,47 @@ class SliceGenerator:
                 new_slices.append(s)
         return new_slices
 
+    def heal_slices(self, slices: List[Slice], duration: Optional[float] = None) -> List[Slice]:
+        """Ensures slices are strictly contiguous without gaps or missing spaces."""
+        if not slices:
+            return slices
+        sorted_slices = sorted(slices, key=lambda s: s.start)
+        # Ensure first slice starts at 0.0
+        if sorted_slices[0].start > 0.05:
+            sorted_slices[0].start = 0.0
+
+        for idx in range(len(sorted_slices) - 1):
+            curr = sorted_slices[idx]
+            nxt = sorted_slices[idx + 1]
+            if curr.end != nxt.start:
+                curr.end = nxt.start
+
+        if duration and duration > 0 and sorted_slices[-1].end < duration - 0.1:
+            sorted_slices[-1].end = round(duration, 3)
+
+        return sorted_slices
+
     def delete_slice(self, slices: List[Slice], slice_id: str) -> List[Slice]:
-        """Removes a slice by its ID."""
-        return [s for s in slices if s.id != slice_id]
+        """Removes a slice and seamlessly heals the timeline so no gaps or black spaces are created."""
+        sorted_slices = sorted(slices, key=lambda s: s.start)
+        target_idx = next((i for i, s in enumerate(sorted_slices) if s.id == slice_id), None)
+        if target_idx is None:
+            return slices
+
+        target = sorted_slices[target_idx]
+        new_slices = [s for s in sorted_slices if s.id != slice_id]
+
+        if new_slices:
+            if target_idx > 0:
+                # Expand previous slice to cover the deleted slice's time
+                prev_s = new_slices[target_idx - 1]
+                prev_s.end = target.end
+                if target.text and target.text not in prev_s.text:
+                    prev_s.text = f"{prev_s.text} {target.text}".strip()
+            else:
+                # If first slice was deleted, expand the new first slice backwards to start
+                new_slices[0].start = target.start
+
+        return new_slices
 
 slice_generator = SliceGenerator()

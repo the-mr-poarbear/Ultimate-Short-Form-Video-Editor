@@ -12,6 +12,8 @@ class SliceVisual(BaseModel):
     positionX: float = 50.0  # 0 to 100% center
     positionY: float = 50.0  # 0 to 100% center
     scale: float = 1.0       # 0.2 to 2.5
+    rotation: float = 0.0    # -180 to 180 deg
+    speed: float = 1.0       # 0.2 to 5.0
     width: float = 75.0      # width in % of 9:16 canvas (15-95%)
     height: float = 40.0     # height in % of 9:16 canvas (10-95%)
     zoom: float = 1.0        # content zoom 1.0 to 3.0

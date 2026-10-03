@@ -26,6 +26,8 @@ export interface SliceVisual {
   positionX?: number; // 0 to 100% center
   positionY?: number; // 0 to 100% center
   scale?: number;     // 0.2 to 2.5
+  rotation?: number;  // -180 to 180 deg
+  speed?: number;     // 0.2 to 5.0
   width?: number;     // width in % of 9:16 canvas (15-95%)
   height?: number;    // height in % of 9:16 canvas (10-95%)
   zoom?: number;      // content zoom 1.0 to 3.0

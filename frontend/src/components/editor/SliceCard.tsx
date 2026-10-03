@@ -5,7 +5,7 @@ import { useCharacterStore } from "../../stores/characterStore";
 import { formatTime, formatDuration } from "../../lib/formatting";
 import { getMediaUrl } from "../../services/api";
 import { timeToPixels } from "../../lib/timeline";
-import { Image as ImageIcon, Video, Scissors, Merge, Trash2, Plus, Sparkles, Users } from "lucide-react";
+import { Image as ImageIcon, Video, Scissors, Merge, Trash2, Plus, Sparkles, Users, RotateCw, Gauge } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 interface SliceCardProps {
@@ -184,7 +184,17 @@ export const SliceCard: React.FC<SliceCardProps> = ({
               {assignedAsset.type === "image" ? (
                 <img src={getMediaUrl(assignedAsset.url)} alt="" className="w-full h-full object-cover" />
               ) : (
-                <Video className="w-3.5 h-3.5 text-indigo-400 m-auto mt-2" />
+                <div className="relative w-full h-full flex items-center justify-center">
+                  <Video className="w-3.5 h-3.5 text-indigo-400 m-auto mt-2" />
+                  {slice.visual?.speed && Math.abs(slice.visual.speed - 1.0) > 0.02 && (
+                    <span
+                      className="absolute bottom-0.5 right-0.5 text-[7px] font-mono font-bold text-indigo-300 bg-black/85 px-0.5 rounded border border-indigo-400/40"
+                      title={`Playback Speed: ${slice.visual.speed.toFixed(2)}x`}
+                    >
+                      {slice.visual.speed.toFixed(1)}x
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           ) : charPose ? (
@@ -353,6 +363,28 @@ export const SliceCard: React.FC<SliceCardProps> = ({
                 <span className="truncate max-w-[65px]">{charData?.name || "Character"}</span>
               </div>
             )}
+
+            {/* Rotation Badge Overlay when visual has rotation */}
+            {slice.visual?.rotation && Math.abs(slice.visual.rotation) > 0.1 ? (
+              <div
+                className="absolute bottom-1 right-1 z-10 flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/85 backdrop-blur-xs border border-cyan-400/60 text-[8px] font-mono font-bold text-cyan-300 shadow-xs pointer-events-none"
+                title={`Visual Rotation: ${Math.round(slice.visual.rotation)}°`}
+              >
+                <RotateCw className="w-2 h-2 text-cyan-400" />
+                <span>{Math.round(slice.visual.rotation)}°</span>
+              </div>
+            ) : null}
+
+            {/* Speed Badge Overlay when visual is video and has speed modifier */}
+            {assignedAsset.type === "video" && slice.visual?.speed && Math.abs(slice.visual.speed - 1.0) > 0.02 ? (
+              <div
+                className="absolute bottom-1 left-1 z-10 flex items-center gap-0.5 px-1 py-0.5 rounded bg-black/85 backdrop-blur-xs border border-indigo-400/60 text-[8px] font-mono font-bold text-indigo-300 shadow-xs pointer-events-none"
+                title={`Playback Speed: ${slice.visual.speed.toFixed(2)}x`}
+              >
+                <Gauge className="w-2 h-2 text-indigo-400" />
+                <span>{slice.visual.speed.toFixed(2)}x</span>
+              </div>
+            ) : null}
           </div>
         ) : charPose ? (
           <div className="relative w-full h-full group flex items-center justify-center bg-black/60 overflow-hidden">
