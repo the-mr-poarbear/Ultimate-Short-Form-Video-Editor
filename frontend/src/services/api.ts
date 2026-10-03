@@ -2,9 +2,15 @@ const API_BASE = "http://localhost:8000";
 
 export async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
+  const isJsonBody = typeof options?.body === "string";
+  const defaultHeaders: Record<string, string> = isJsonBody
+    ? { "Content-Type": "application/json" }
+    : {};
+
   const response = await fetch(url, {
     ...options,
     headers: {
+      ...defaultHeaders,
       ...(options?.headers || {}),
     },
   });

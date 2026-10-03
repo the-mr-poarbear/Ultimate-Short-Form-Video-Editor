@@ -95,8 +95,8 @@ class AudioService:
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(input_path),
-                "-ar", "16000",
-                "-ac", "1",
+                "-ar", "44100",
+                "-ac", "2",
                 "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
                 str(output_path)
             ]
@@ -157,8 +157,8 @@ class AudioService:
             "-i", str(input_path),
             "-filter_complex", full_filter,
             "-map", "[outa]",
-            "-ar", "16000",
-            "-ac", "1",
+            "-ar", "44100",
+            "-ac", "2",
             str(output_path)
         ]
 
@@ -169,8 +169,8 @@ class AudioService:
             fallback_cmd = [
                 "ffmpeg", "-y",
                 "-i", str(input_path),
-                "-ar", "16000",
-                "-ac", "1",
+                "-ar", "44100",
+                "-ac", "2",
                 "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
                 str(output_path)
             ]

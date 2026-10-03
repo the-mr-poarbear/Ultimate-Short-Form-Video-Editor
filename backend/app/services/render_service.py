@@ -206,9 +206,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         return output_ass_path
 
-    def render(self, project: Project, project_dir: Path, job_id: Optional[str] = None) -> Path:
+    def render(
+        self,
+        project: Project,
+        project_dir: Path,
+        job_id: Optional[str] = None,
+        resolution: str = "1080p",
+        custom_width: Optional[int] = None,
+        custom_height: Optional[int] = None,
+        start_time: Optional[float] = None,
+        end_time: Optional[float] = None,
+        fps: int = 30
+    ) -> Path:
         """
-        Renders the full 1080x1920 30FPS MP4 video using FFmpeg.
+        Renders the video using FFmpeg with customizable resolution and trim range.
         """
         renders_dir = project_dir / "renders"
         renders_dir.mkdir(exist_ok=True)
@@ -224,14 +235,62 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         if duration <= 0:
             duration = 10.0
 
+        # Calculate target resolution
+        res_lower = (resolution or "1080p").lower()
+        if res_lower == "720p":
+            target_w, target_h = 720, 1280
+        elif res_lower in ("4k", "2160p"):
+            target_w, target_h = 2160, 3840
+        elif res_lower == "custom" and custom_width and custom_height:
+            target_w = int(custom_width) - (int(custom_width) % 2)
+            target_h = int(custom_height) - (int(custom_height) % 2)
+        else:
+            target_w, target_h = 1080, 1920
+
+        # Calculate timing range
+        clip_start = max(0.0, float(start_time or 0.0))
+        clip_end = min(duration, float(end_time)) if (end_time is not None and float(end_time) > clip_start) else duration
+        export_dur = max(0.1, clip_end - clip_start)
+        is_partial = (clip_start > 0.02 or clip_end < duration - 0.02)
+        time_args = ["-ss", f"{clip_start:.3f}", "-t", f"{export_dur:.3f}"] if is_partial else ["-shortest"]
+
         # Build FFmpeg command inputs
         inputs = []
         filter_graphs = []
 
         # Input 0: Audio voiceover
         processed_audio_path = project_dir / "audio" / "processed.wav"
+        orig_files = list((project_dir / "audio").glob("original.*"))
+
+        # Automatically upgrade legacy 16kHz mono audio to pristine 44.1kHz stereo
+        if processed_audio_path.exists() and orig_files:
+            try:
+                from app.services.audio_service import audio_service
+                probe_cmd = [
+                    "ffprobe", "-v", "error", "-select_streams", "a:0",
+                    "-show_entries", "stream=sample_rate,channels",
+                    "-of", "default=noprint_wrappers=1:nokey=1", str(processed_audio_path)
+                ]
+                probe_out = subprocess.run(probe_cmd, stdout=subprocess.PIPE, text=True).stdout.strip().split()
+                if probe_out:
+                    sr = int(probe_out[0])
+                    ch = int(probe_out[1]) if len(probe_out) > 1 else 1
+                    if sr <= 16000 or ch < 2:
+                        print(f"[VideoRenderer] Upgrading legacy low-quality audio ({sr}Hz, {ch}ch) to 44.1kHz stereo...")
+                        threshold = getattr(project.settings, "silenceThresholdDb", -35.0)
+                        min_silence = getattr(project.settings, "minimumSilenceMs", 300)
+                        retention = getattr(project.settings, "silenceRetentionPercent", 20.0)
+                        audio_service.process_and_reduce_silence(
+                            input_path=orig_files[0],
+                            output_path=processed_audio_path,
+                            threshold_db=threshold,
+                            min_silence_ms=min_silence,
+                            retention_percent=retention
+                        )
+            except Exception as e:
+                print(f"[VideoRenderer] Audio upgrade note: {e}")
+
         if not processed_audio_path.exists():
-            orig_files = list((project_dir / "audio").glob("original.*"))
             if orig_files:
                 processed_audio_path = orig_files[0]
             else:
@@ -702,19 +761,26 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         # Escape path for FFmpeg subtitles filter on Windows
         fonts_dir = (Path(__file__).resolve().parent.parent / "assets" / "fonts")
         escaped_ass = str(ass_path).replace("\\", "/").replace(":", "\\:")
+        sub_tag = "[pre_outv]" if (target_w != 1080 or target_h != 1920) else "[outv]"
         if fonts_dir.exists():
             escaped_fonts_dir = str(fonts_dir).replace("\\", "/").replace(":", "\\:")
             filter_graphs.append(
-                f"[{current_canvas}]subtitles='{escaped_ass}':fontsdir='{escaped_fonts_dir}'[outv]"
+                f"[{current_canvas}]subtitles='{escaped_ass}':fontsdir='{escaped_fonts_dir}'{sub_tag}"
             )
         else:
             filter_graphs.append(
-                f"[{current_canvas}]subtitles='{escaped_ass}'[outv]"
+                f"[{current_canvas}]subtitles='{escaped_ass}'{sub_tag}"
+            )
+
+        if target_w != 1080 or target_h != 1920:
+            filter_graphs.append(
+                f";[pre_outv]scale={target_w}:{target_h}:flags=lanczos[outv]"
             )
 
         # Audio mixing: Master voiceover (0:a) + Background music + Timeline Sound Effects
+        # Resample all tracks to 44.1kHz stereo to guarantee pristine high-fidelity audio
         audio_mix_inputs = ["[voice]"]
-        filter_graphs.append(";[0:a]volume=1.0[voice];")
+        filter_graphs.append(";[0:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,volume=1.0[voice];")
 
         if has_bgm and bgm_input_idx is not None:
             bgm_vol = getattr(project.backgroundMusic, "volume", 0.15) if project.backgroundMusic else 0.15
@@ -722,7 +788,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             fade_out = getattr(project.backgroundMusic, "fadeOutDuration", 2.0) if project.backgroundMusic else 2.0
             fade_out_st = max(0.0, duration - fade_out)
             filter_graphs.append(
-                f"[{bgm_input_idx}:a]volume={bgm_vol:.3f},afade=t=in:st=0:d={fade_in:.2f},afade=t=out:st={fade_out_st:.2f}:d={fade_out:.2f},atrim=duration={duration:.3f}[bgm_aud];"
+                f"[{bgm_input_idx}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,volume={bgm_vol:.3f},afade=t=in:st=0:d={fade_in:.2f},afade=t=out:st={fade_out_st:.2f}:d={fade_out:.2f},atrim=duration={duration:.3f}[bgm_aud];"
             )
             audio_mix_inputs.append("[bgm_aud]")
 
@@ -731,13 +797,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             start_ms = max(0, int(sfx.start * 1000))
             tag_sfx = f"sfx_aud_{s_idx}"
             filter_graphs.append(
-                f"[{in_idx}:a]volume={sfx_vol:.3f},adelay={start_ms}|{start_ms},atrim=duration={duration:.3f}[{tag_sfx}];"
+                f"[{in_idx}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,volume={sfx_vol:.3f},adelay={start_ms}|{start_ms},atrim=duration={duration:.3f}[{tag_sfx}];"
             )
             audio_mix_inputs.append(f"[{tag_sfx}]")
 
         if len(audio_mix_inputs) > 1:
             filter_graphs.append(
-                f"{''.join(audio_mix_inputs)}amix=inputs={len(audio_mix_inputs)}:duration=first:dropout_transition=2[outa]"
+                f"{''.join(audio_mix_inputs)}amix=inputs={len(audio_mix_inputs)}:duration=first:dropout_transition=0:normalize=0[outa]"
             )
             audio_map_tag = "[outa]"
         else:
@@ -749,7 +815,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         print(f"[VideoRenderer] Exporting using encoder: {encoder_info['name']}")
 
         if job_id:
-            job_service.update_progress(job_id, 45, f"Exporting 1080x1920 MP4 via {encoder_info['name']}...")
+            res_label = f"{target_w}x{target_h}"
+            dur_label = f"{export_dur:.1f}s"
+            job_service.update_progress(job_id, 45, f"Exporting {res_label} MP4 ({dur_label}) via {encoder_info['name']}...")
 
         cmd = [
             "ffmpeg", "-y",
@@ -762,8 +830,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             *encoder_info["args"],
             "-pix_fmt", "yuv420p",
             "-c:a", "aac",
-            "-b:a", "192k",
-            "-shortest",
+            "-b:a", "256k",
+            "-ar", "44100",
+            "-ac", "2",
+            *time_args,
             str(output_mp4)
         ]
 
@@ -786,8 +856,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     *cpu_args,
                     "-pix_fmt", "yuv420p",
                     "-c:a", "aac",
-                    "-b:a", "192k",
-                    "-shortest",
+                    "-b:a", "256k",
+                    "-ar", "44100",
+                    "-ac", "2",
+                    *time_args,
                     str(output_mp4)
                 ]
                 res = subprocess.run(fallback_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -807,8 +879,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     *cpu_args,
                     "-pix_fmt", "yuv420p",
                     "-c:a", "aac",
-                    "-b:a", "192k",
-                    "-shortest",
+                    "-b:a", "256k",
+                    "-ar", "44100",
+                    "-ac", "2",
+                    *time_args,
                     str(output_mp4)
                 ]
                 res = subprocess.run(alt_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
@@ -816,7 +890,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 raise RuntimeError(f"FFmpeg render failed: {res.stderr[-500:]}")
 
         if job_id:
-            job_service.complete_job(job_id, "Video exported successfully", {"videoUrl": f"/media/{project.id}/renders/final.mp4"})
+            import time
+            timestamp = int(time.time())
+            job_service.complete_job(job_id, "Video exported successfully", {"videoUrl": f"/media/{project.id}/renders/final.mp4?t={timestamp}"})
 
         return output_mp4
 

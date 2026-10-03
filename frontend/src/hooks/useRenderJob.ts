@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useEditorStore } from "../stores/editorStore";
-import { renderService } from "../services/renderService";
+import { renderService, type RenderOptions } from "../services/renderService";
 import type { Job } from "../types/jobs";
 
 export function useRenderJob() {
@@ -11,14 +11,14 @@ export function useRenderJob() {
 
   const project = useEditorStore((s) => s.project);
 
-  const startRender = useCallback(async () => {
+  const startRender = useCallback(async (options?: RenderOptions) => {
     if (!project) return;
     setIsRendering(true);
     setError(null);
     setDownloadUrl(null);
 
     try {
-      const { jobId } = await renderService.startRender(project.id);
+      const { jobId } = await renderService.startRender(project.id, options);
 
       const interval = setInterval(async () => {
         try {
