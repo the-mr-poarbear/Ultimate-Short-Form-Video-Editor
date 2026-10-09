@@ -47,7 +47,7 @@ def split_slice(project_id: str, req: SplitSliceRequest):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    proj.slices = slice_generator.split_slice_at_time(proj.slices, req.sliceId, req.splitTime)
+    proj.slices = slice_generator.split_slice_at_time(proj.slices, req.sliceId, req.splitTime, proj.duration)
     project_service.save_project(proj)
     return {"slices": proj.slices}
 
@@ -57,7 +57,7 @@ def merge_slices(project_id: str, req: MergeSlicesRequest):
     if not proj:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    proj.slices = slice_generator.merge_slices(proj.slices, req.firstId, req.secondId)
+    proj.slices = slice_generator.merge_slices(proj.slices, req.firstId, req.secondId, proj.duration)
     project_service.save_project(proj)
     return {"slices": proj.slices}
 

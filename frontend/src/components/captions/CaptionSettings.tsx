@@ -183,6 +183,10 @@ export const CaptionSettings: React.FC = () => {
               ))}
             </div>
           </div>
+          <div className="text-[9.5px] text-muted-foreground/80 flex items-center gap-1 font-sans">
+            <Sparkles className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+            <span>Used for active spoken words & center-screen emphasized words.</span>
+          </div>
         </div>
       </div>
 

@@ -180,25 +180,36 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     w_start_str = self.format_ass_time(active_word.start)
                     w_end_str = self.format_ass_time(active_word.end)
 
-                    text_parts = []
-                    for i, w in enumerate(chunk):
-                        # Force uppercase to strictly match preview viewer
-                        clean_w = w.word.strip().replace("{", "").replace("}", "").upper()
-                        if i == active_i:
-                            # Highlighted active word: Pop scale (112%), highlight color, stroke
-                            text_parts.append(
-                                f"{{\\1c&H{highlight_hex}&\\3c&H{outline_hex}&\\b1\\fscx112\\fscy112}}{clean_w}"
-                            )
-                        else:
-                            # Inactive word: Primary color, stroke, normal scale
-                            text_parts.append(
-                                f"{{\\1c&H{primary_hex}&\\3c&H{outline_hex}&\\b1\\fscx100\\fscy100}}{clean_w}"
-                            )
+                    is_emp = bool(getattr(active_word, "emphasized", False))
+                    if is_emp:
+                        # Emphasized active word: bold, big, centered on screen (pos 540, 960)
+                        clean_w = active_word.word.strip().replace("{", "").replace("}", "").upper()
+                        big_fs = int((font_size or 52) * 2.4)
+                        emp_stroke = max(int(stroke_w * 2), 4)
+                        emp_text = f"{{\\an5\\pos(540,960)\\fs{big_fs}\\b1\\1c&H{highlight_hex}&\\3c&H{outline_hex}&\\bord{emp_stroke}\\shad4\\fscx115\\fscy115}}{clean_w}"
+                        events.append(
+                            f"Dialogue: 1,{w_start_str},{w_end_str},Default,,0,0,0,,{emp_text}"
+                        )
+                    else:
+                        text_parts = []
+                        for i, w in enumerate(chunk):
+                            # Force uppercase to strictly match preview viewer
+                            clean_w = w.word.strip().replace("{", "").replace("}", "").upper()
+                            if i == active_i:
+                                # Highlighted active word: Pop scale (112%), highlight color, stroke
+                                text_parts.append(
+                                    f"{{\\1c&H{highlight_hex}&\\3c&H{outline_hex}&\\b1\\fscx112\\fscy112}}{clean_w}"
+                                )
+                            else:
+                                # Inactive word: Primary color, stroke, normal scale
+                                text_parts.append(
+                                    f"{{\\1c&H{primary_hex}&\\3c&H{outline_hex}&\\b1\\fscx100\\fscy100}}{clean_w}"
+                                )
 
-                    line_text = " ".join(text_parts)
-                    events.append(
-                        f"Dialogue: 0,{w_start_str},{w_end_str},Default,,0,0,0,,{line_text}"
-                    )
+                        line_text = " ".join(text_parts)
+                        events.append(
+                            f"Dialogue: 0,{w_start_str},{w_end_str},Default,,0,0,0,,{line_text}"
+                        )
 
         content = header + "\n".join(events) + "\n"
         with open(output_ass_path, "w", encoding="utf-8") as f:

@@ -6,6 +6,7 @@ class WordTiming(BaseModel):
     start: float
     end: float
     confidence: Optional[float] = None
+    emphasized: Optional[bool] = False
 
 class TranscriptSegment(BaseModel):
     id: str

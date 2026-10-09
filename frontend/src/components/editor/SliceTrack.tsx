@@ -18,15 +18,15 @@ export const SliceTrack: React.FC<SliceTrackProps> = ({
   const currentTime = useEditorStore((s) => s.currentTime);
   const selectedSliceId = useEditorStore((s) => s.selectedSliceId);
   const selectSlice = useEditorStore((s) => s.selectSlice);
-  const splitSlice = useEditorStore((s) => s.splitSlice);
+  const splitSliceAtTime = useEditorStore((s) => s.splitSliceAtTime);
   const mergeSlices = useEditorStore((s) => s.mergeSlices);
   const deleteSlice = useEditorStore((s) => s.deleteSlice);
   const removeVisualFromSlice = useEditorStore((s) => s.removeVisualFromSlice);
 
   const slices = project?.slices || [];
 
-  const handleSplit = (sliceId: string, time: number) => {
-    splitSlice(sliceId, time);
+  const handleSplit = (_sliceId: string, time: number) => {
+    splitSliceAtTime(time);
   };
 
   const handleMerge = (firstId: string) => {

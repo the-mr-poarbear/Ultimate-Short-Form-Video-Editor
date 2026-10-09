@@ -96,6 +96,13 @@ interface EditorState {
   isSliceMode: boolean;
   setSliceMode: (active: boolean) => void;
 
+  isEmphasizeMode: boolean;
+  setEmphasizeMode: (active: boolean) => void;
+  toggleWordEmphasis: (segmentId: string, wordIndex: number) => void;
+  setWordEmphasis: (segmentId: string, wordIndex: number, emphasized: boolean) => void;
+  clearSectionEmphasis: (segmentId: string) => void;
+  clearAllEmphasis: () => void;
+
   isSliceSettingsOpen: boolean;
   setSliceSettingsOpen: (open: boolean) => void;
 
@@ -182,6 +189,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   activeJob: null,
   isCaptionSettingsOpen: false,
   isSliceMode: false,
+  isEmphasizeMode: false,
   isSliceSettingsOpen: false,
   isBackgroundMusicModalOpen: false,
   isOverlaysModalOpen: false,
@@ -287,7 +295,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   markSaved: () => set({ isDirty: false, lastSavedAt: new Date(), saveError: null }),
 
   setCaptionSettingsOpen: (open) => set({ isCaptionSettingsOpen: open }),
-  setSliceMode: (active) => set({ isSliceMode: active }),
+  setSliceMode: (active) => set({ isSliceMode: active, ...(active ? { isEmphasizeMode: false } : {}) }),
+  setEmphasizeMode: (active) => set({ isEmphasizeMode: active, ...(active ? { isSliceMode: false } : {}) }),
   setSliceSettingsOpen: (open) => set({ isSliceSettingsOpen: open }),
 
   setProject: (project, clearHistory = false) => {
@@ -720,65 +729,96 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       };
     }),
 
-  splitSlice: (sliceId, splitTime) =>
-    set((state) => {
-      if (!state.project) return state;
-      const hist = pushHistory(state);
-      const newSlices: Slice[] = [];
-      for (const s of state.project.slices) {
-        if (s.id === sliceId && s.start < splitTime && splitTime < s.end) {
-          newSlices.push({
-            id: `${s.id}-a`,
-            start: s.start,
-            end: Math.round(splitTime * 100) / 100,
-            text: s.text,
-            visual: s.visual,
-          });
-          newSlices.push({
-            id: `${s.id}-b`,
-            start: Math.round(splitTime * 100) / 100,
-            end: s.end,
-            text: s.text,
-          });
-        } else {
-          newSlices.push(s);
-        }
-      }
-      return {
-        ...hist,
-        project: {
-          ...state.project,
-          slices: newSlices,
-        },
-      };
-    }),
+  splitSlice: (_sliceId, splitTime) => {
+    get().splitSliceAtTime(splitTime);
+  },
 
   splitSliceAtTime: (splitTime) =>
     set((state) => {
       if (!state.project) return state;
       const hist = pushHistory(state);
-      const targetTime = Math.round(splitTime * 100) / 100;
+      const targetInputTime = Math.max(0, splitTime);
       const slices = state.project.slices;
 
-      // Extract all words from transcript for word-aware text partitioning
-      const allWords = state.project.transcript.flatMap((t) => t.words || []);
+      // Extract and sort all words from transcript for word-aware text partitioning
+      const allWords = (state.project.transcript || [])
+        .flatMap((t) => t.words || [])
+        .sort((a, b) => a.start - b.start);
 
-      // If no slices exist yet, initialize slices around splitTime
+      // 1. Identify target word to start the new slice/section
+      let targetWord: import("../types/transcript").WordTiming | null = null;
+      let targetWordIdx = -1;
+
+      // A) Direct/close match with word start (e.g. word clicked in transcript)
+      const directMatchIdx = allWords.findIndex(
+        (w) => Math.abs(w.start - targetInputTime) < 0.05
+      );
+      if (directMatchIdx !== -1) {
+        targetWordIdx = directMatchIdx;
+        targetWord = allWords[directMatchIdx];
+      } else {
+        // B) Playhead or time inside a word
+        const containingWordIdx = allWords.findIndex(
+          (w) => w.start <= targetInputTime && targetInputTime <= w.end
+        );
+        if (containingWordIdx !== -1) {
+          const w = allWords[containingWordIdx];
+          const dur = Math.max(0.01, w.end - w.start);
+          const progress = (targetInputTime - w.start) / dur;
+          // If within the first 45% of the word, start new section with this word
+          if (progress < 0.45) {
+            targetWordIdx = containingWordIdx;
+            targetWord = w;
+          } else if (containingWordIdx < allWords.length - 1) {
+            // Otherwise start new section with the next word
+            targetWordIdx = containingWordIdx + 1;
+            targetWord = allWords[containingWordIdx + 1];
+          }
+        } else {
+          // C) In pause between words
+          const nextWordIdx = allWords.findIndex((w) => w.start > targetInputTime);
+          if (nextWordIdx !== -1) {
+            targetWordIdx = nextWordIdx;
+            targetWord = allWords[nextWordIdx];
+          }
+        }
+      }
+
+      // 2. Calculate exact acoustic cut time with natural lead-in in the acoustic pause
+      let exactCutTime = Math.round(targetInputTime * 100) / 100;
+
+      if (targetWord) {
+        const prevWord = targetWordIdx > 0 ? allWords[targetWordIdx - 1] : null;
+        if (prevWord) {
+          const pause = Math.max(0, targetWord.start - prevWord.end);
+          // Lead-in into natural pause before word (up to 80ms, but at most half the pause)
+          const leadIn = Math.min(pause * 0.5, 0.08);
+          exactCutTime = Math.max(
+            Math.round(prevWord.end * 100) / 100,
+            Math.round((targetWord.start - leadIn) * 100) / 100
+          );
+        } else {
+          exactCutTime = Math.max(0, Math.round((targetWord.start - 0.08) * 100) / 100);
+        }
+      }
+
+      const totalDur = state.project.duration || 10;
+
+      // Handle case where no slices exist yet
       if (slices.length === 0) {
-        const totalDur = state.project.duration || 10;
-        if (targetTime <= 0.2 || targetTime >= totalDur - 0.2) return state;
-        const wordsA = allWords.filter((w) => w.end <= targetTime + 0.05).map((w) => w.word).join(" ");
-        const wordsB = allWords.filter((w) => w.start >= targetTime - 0.05).map((w) => w.word).join(" ");
+        if (exactCutTime <= 0.05 || exactCutTime >= totalDur - 0.05) return state;
+        const wordsA = allWords.filter((w) => w.start < exactCutTime).map((w) => w.word).join(" ");
+        const wordsB = allWords.filter((w) => w.start >= exactCutTime).map((w) => w.word).join(" ");
 
         const s1: Slice = {
           id: `slice-${Date.now()}-1`,
           start: 0,
-          end: targetTime,
+          end: exactCutTime,
           text: wordsA || "Section 1",
         };
         const s2: Slice = {
           id: `slice-${Date.now()}-2`,
-          start: targetTime,
+          start: exactCutTime,
           end: Math.round(totalDur * 100) / 100,
           text: wordsB || "Section 2",
         };
@@ -786,96 +826,219 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           ...hist,
           project: {
             ...state.project,
-            slices: [s1, s2],
+            slices: healSliceBoundaries([s1, s2], totalDur),
           },
+          currentTime: exactCutTime,
           selectedSliceId: s2.id,
         };
       }
 
-      // Find slice containing targetTime
-      const targetSlice = slices.find((s) => s.start + 0.1 < targetTime && targetTime < s.end - 0.1);
-      if (!targetSlice) return state;
-
-      // Partition words
-      const sliceWords = allWords.filter((w) => w.start >= targetSlice.start - 0.05 && w.end <= targetSlice.end + 0.05);
-
-      let textA = targetSlice.text;
-      let textB = targetSlice.text;
-
-      if (sliceWords.length > 1) {
-        const wordsBefore = sliceWords.filter((w) => w.end <= targetTime + 0.02).map((w) => w.word).join(" ");
-        const wordsAfter = sliceWords.filter((w) => w.start >= targetTime - 0.02).map((w) => w.word).join(" ");
-        if (wordsBefore && wordsAfter) {
-          textA = wordsBefore;
-          textB = wordsAfter;
-        } else if (wordsBefore && !wordsAfter) {
-          textA = wordsBefore;
-          textB = targetSlice.text ? `${targetSlice.text} (Break)` : "(Break)";
-        } else if (!wordsBefore && wordsAfter) {
-          textA = targetSlice.text ? `${targetSlice.text} (Intro)` : "(Intro)";
-          textB = wordsAfter;
-        }
+      // 3. Find slice containing exactCutTime
+      const sortedSlices = [...slices].sort((a, b) => a.start - b.start);
+      let targetSlice = sortedSlices.find(
+        (s) => s.start <= exactCutTime + 0.01 && exactCutTime <= s.end - 0.01
+      );
+      if (!targetSlice) {
+        targetSlice = sortedSlices.find((s) => s.start <= exactCutTime) || sortedSlices[0];
       }
 
-      const idA = `${targetSlice.id}-a`;
-      const idB = `${targetSlice.id}-b`;
+      let newSlices: Slice[] = [];
+      let selectedId = "";
 
-      const newSlices: Slice[] = [];
-      for (const s of slices) {
-        if (s.id === targetSlice.id) {
-          newSlices.push({
-            id: idA,
-            start: s.start,
-            end: targetTime,
-            text: textA,
-            visual: s.visual,
-          });
-          newSlices.push({
-            id: idB,
-            start: targetTime,
-            end: s.end,
-            text: textB,
-            visual: s.visual ? { ...s.visual } : undefined,
-          });
-        } else {
-          newSlices.push(s);
-        }
-      }
+      // Check if exactCutTime is right near an existing slice boundary (within 150ms)
+      const nearStart = Math.abs(exactCutTime - targetSlice.start) < 0.15;
+      const nearEnd = Math.abs(targetSlice.end - exactCutTime) < 0.15;
 
-      // Also partition the corresponding transcript segment so the synchronized transcription viewer splits it visually
-      const newTranscript: import("../types/transcript").TranscriptSegment[] = [];
-      let didSplitTranscript = false;
-
-      for (const seg of state.project.transcript) {
-        const words = seg.words || [];
-        const cutWordIdx = words.findIndex(
-          (w) => Math.abs(w.start - targetTime) < 0.08 || (w.start >= targetTime - 0.02 && targetTime < w.end)
+      if (nearStart && targetSlice.start > 0.05) {
+        // Boundary adjustment: snap boundary to exactCutTime
+        const targetIdx = sortedSlices.findIndex((s) => s.id === targetSlice!.id);
+        newSlices = sortedSlices.map((s, idx) => {
+          if (idx === targetIdx - 1) {
+            return { ...s, end: exactCutTime };
+          }
+          if (idx === targetIdx) {
+            return { ...s, start: exactCutTime };
+          }
+          return s;
+        });
+        selectedId = targetSlice.id;
+      } else if (nearEnd && targetSlice.end < totalDur - 0.05) {
+        const targetIdx = sortedSlices.findIndex((s) => s.id === targetSlice!.id);
+        const nextSlice = targetIdx < sortedSlices.length - 1 ? sortedSlices[targetIdx + 1] : null;
+        newSlices = sortedSlices.map((s, idx) => {
+          if (idx === targetIdx) {
+            return { ...s, end: exactCutTime };
+          }
+          if (idx === targetIdx + 1) {
+            return { ...s, start: exactCutTime };
+          }
+          return s;
+        });
+        selectedId = nextSlice ? nextSlice.id : targetSlice.id;
+      } else {
+        // Standard split of targetSlice into sliceA and sliceB
+        const sliceWords = allWords.filter(
+          (w) => w.start >= targetSlice!.start - 0.05 && w.end <= targetSlice!.end + 0.05
         );
 
-        if (!didSplitTranscript && cutWordIdx > 0 && cutWordIdx < words.length) {
-          const wordsBefore = words.slice(0, cutWordIdx);
-          const wordsAfter = words.slice(cutWordIdx);
+        let textA = targetSlice.text;
+        let textB = targetSlice.text;
 
-          const segA = {
-            id: `${seg.id}-a`,
-            start: seg.start,
-            end: wordsBefore[wordsBefore.length - 1]?.end || targetTime,
-            text: wordsBefore.map((w) => w.word).join(" "),
-            words: wordsBefore,
-          };
+        if (sliceWords.length > 0) {
+          const wordsBefore = sliceWords.filter((w) => w.start < exactCutTime).map((w) => w.word).join(" ");
+          const wordsAfter = sliceWords.filter((w) => w.start >= exactCutTime).map((w) => w.word).join(" ");
+          if (wordsBefore && wordsAfter) {
+            textA = wordsBefore;
+            textB = wordsAfter;
+          } else if (wordsBefore && !wordsAfter) {
+            textA = wordsBefore;
+            textB = targetSlice.text ? `${targetSlice.text} (Break)` : "(Break)";
+          } else if (!wordsBefore && wordsAfter) {
+            textA = targetSlice.text ? `${targetSlice.text} (Intro)` : "(Intro)";
+            textB = wordsAfter;
+          }
+        }
 
-          const segB = {
-            id: `${seg.id}-b`,
-            start: wordsAfter[0]?.start || targetTime,
-            end: seg.end,
-            text: wordsAfter.map((w) => w.word).join(" "),
-            words: wordsAfter,
-          };
+        const idA = `${targetSlice.id}-a`;
+        const idB = `${targetSlice.id}-b`;
+        selectedId = idB;
 
-          newTranscript.push(segA, segB);
-          didSplitTranscript = true;
-        } else {
-          newTranscript.push(seg);
+        for (const s of sortedSlices) {
+          if (s.id === targetSlice.id) {
+            newSlices.push({
+              id: idA,
+              start: s.start,
+              end: exactCutTime,
+              text: textA,
+              visual: s.visual,
+            });
+            newSlices.push({
+              id: idB,
+              start: exactCutTime,
+              end: s.end,
+              text: textB,
+              visual: s.visual ? { ...s.visual } : undefined,
+            });
+          } else {
+            newSlices.push(s);
+          }
+        }
+      }
+
+      // Always heal slices so they are strictly contiguous with zero gaps
+      const healedSlices = healSliceBoundaries(newSlices, totalDur);
+
+      // 4. Partition or align transcript segments
+      const currentTranscript = state.project.transcript || [];
+      const newTranscript: import("../types/transcript").TranscriptSegment[] = [];
+      let didHandleTranscript = false;
+
+      // Locate target segment and word in transcript
+      if (targetWord) {
+        let segIdx = -1;
+        let wordIdxInSeg = -1;
+
+        for (let i = 0; i < currentTranscript.length; i++) {
+          const seg = currentTranscript[i];
+          const wIdx = (seg.words || []).findIndex(
+            (w) => w === targetWord || (w.word === targetWord!.word && Math.abs(w.start - targetWord!.start) < 0.01)
+          );
+          if (wIdx !== -1) {
+            segIdx = i;
+            wordIdxInSeg = wIdx;
+            break;
+          }
+        }
+
+        if (segIdx !== -1) {
+          const targetSeg = currentTranscript[segIdx];
+          const segWords = targetSeg.words || [];
+
+          if (wordIdxInSeg > 0 && wordIdxInSeg < segWords.length) {
+            // Split segment into segA and segB
+            const wordsBefore = segWords.slice(0, wordIdxInSeg);
+            const wordsAfter = segWords.slice(wordIdxInSeg);
+
+            const segA: import("../types/transcript").TranscriptSegment = {
+              id: `${targetSeg.id}-a`,
+              start: targetSeg.start,
+              end: exactCutTime,
+              text: wordsBefore.map((w) => w.word).join(" "),
+              words: wordsBefore,
+            };
+
+            const segB: import("../types/transcript").TranscriptSegment = {
+              id: `${targetSeg.id}-b`,
+              start: exactCutTime,
+              end: targetSeg.end,
+              text: wordsAfter.map((w) => w.word).join(" "),
+              words: wordsAfter,
+            };
+
+            for (let i = 0; i < currentTranscript.length; i++) {
+              if (i === segIdx) {
+                newTranscript.push(segA, segB);
+              } else {
+                newTranscript.push(currentTranscript[i]);
+              }
+            }
+            didHandleTranscript = true;
+          } else if (wordIdxInSeg === 0) {
+            // Target word is already the first word of targetSeg.
+            // Synchronize boundary with previous segment so there is no gap!
+            for (let i = 0; i < currentTranscript.length; i++) {
+              if (i === segIdx - 1) {
+                newTranscript.push({
+                  ...currentTranscript[i],
+                  end: exactCutTime,
+                });
+              } else if (i === segIdx) {
+                newTranscript.push({
+                  ...targetSeg,
+                  start: exactCutTime,
+                });
+              } else {
+                newTranscript.push(currentTranscript[i]);
+              }
+            }
+            didHandleTranscript = true;
+          }
+        }
+      }
+
+      // Fallback: If not handled by word, check by exactCutTime
+      if (!didHandleTranscript) {
+        for (const seg of currentTranscript) {
+          if (!didHandleTranscript && seg.start < exactCutTime && exactCutTime < seg.end) {
+            const segWords = seg.words || [];
+            const cutWordIdx = segWords.findIndex((w) => w.start >= exactCutTime);
+
+            if (cutWordIdx > 0 && cutWordIdx < segWords.length) {
+              const wordsBefore = segWords.slice(0, cutWordIdx);
+              const wordsAfter = segWords.slice(cutWordIdx);
+
+              const segA: import("../types/transcript").TranscriptSegment = {
+                id: `${seg.id}-a`,
+                start: seg.start,
+                end: exactCutTime,
+                text: wordsBefore.map((w) => w.word).join(" "),
+                words: wordsBefore,
+              };
+              const segB: import("../types/transcript").TranscriptSegment = {
+                id: `${seg.id}-b`,
+                start: exactCutTime,
+                end: seg.end,
+                text: wordsAfter.map((w) => w.word).join(" "),
+                words: wordsAfter,
+              };
+              newTranscript.push(segA, segB);
+              didHandleTranscript = true;
+            } else {
+              newTranscript.push(seg);
+            }
+          } else {
+            newTranscript.push(seg);
+          }
         }
       }
 
@@ -883,10 +1046,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         ...hist,
         project: {
           ...state.project,
-          slices: newSlices,
-          transcript: didSplitTranscript ? newTranscript : state.project.transcript,
+          slices: healedSlices,
+          transcript: didHandleTranscript ? newTranscript : currentTranscript,
         },
-        selectedSliceId: idB,
+        currentTime: exactCutTime,
+        selectedSliceId: selectedId || state.selectedSliceId,
       };
     }),
 
@@ -910,11 +1074,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         .filter((s) => s.id !== secondId)
         .map((s) => (s.id === firstId ? merged : s));
 
+      const healedSlices = healSliceBoundaries(newSlices, state.project.duration);
+
       return {
         ...hist,
         project: {
           ...state.project,
-          slices: newSlices,
+          slices: healedSlices,
         },
       };
     }),
@@ -1101,12 +1267,107 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         project: {
           ...state.project,
           transcript: newTranscript,
-          slices: newSlices,
+          slices: healSliceBoundaries(newSlices, state.project.duration),
         },
         selectedSliceId: targetSliceId || state.selectedSliceId,
       };
     });
     return outcome;
+  },
+
+  toggleWordEmphasis: (segmentId, wordIndex) => {
+    set((state) => {
+      if (!state.project || !state.project.transcript) return state;
+      const hist = pushHistory(state);
+      const newTranscript = state.project.transcript.map((seg) => {
+        if (seg.id !== segmentId) return seg;
+        const newWords = (seg.words || []).map((w, idx) => {
+          if (idx !== wordIndex) return w;
+          return {
+            ...w,
+            emphasized: !w.emphasized,
+          };
+        });
+        return {
+          ...seg,
+          words: newWords,
+        };
+      });
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          transcript: newTranscript,
+        },
+      };
+    });
+  },
+
+  setWordEmphasis: (segmentId, wordIndex, emphasized) => {
+    set((state) => {
+      if (!state.project || !state.project.transcript) return state;
+      const hist = pushHistory(state);
+      const newTranscript = state.project.transcript.map((seg) => {
+        if (seg.id !== segmentId) return seg;
+        const newWords = (seg.words || []).map((w, idx) => {
+          if (idx !== wordIndex) return w;
+          return {
+            ...w,
+            emphasized,
+          };
+        });
+        return {
+          ...seg,
+          words: newWords,
+        };
+      });
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          transcript: newTranscript,
+        },
+      };
+    });
+  },
+
+  clearSectionEmphasis: (segmentId) => {
+    set((state) => {
+      if (!state.project || !state.project.transcript) return state;
+      const hist = pushHistory(state);
+      const newTranscript = state.project.transcript.map((seg) => {
+        if (seg.id !== segmentId) return seg;
+        return {
+          ...seg,
+          words: (seg.words || []).map((w) => ({ ...w, emphasized: false })),
+        };
+      });
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          transcript: newTranscript,
+        },
+      };
+    });
+  },
+
+  clearAllEmphasis: () => {
+    set((state) => {
+      if (!state.project || !state.project.transcript) return state;
+      const hist = pushHistory(state);
+      const newTranscript = state.project.transcript.map((seg) => ({
+        ...seg,
+        words: (seg.words || []).map((w) => ({ ...w, emphasized: false })),
+      }));
+      return {
+        ...hist,
+        project: {
+          ...state.project,
+          transcript: newTranscript,
+        },
+      };
+    });
   },
 
   setActiveJob: (activeJob) => set({ activeJob }),

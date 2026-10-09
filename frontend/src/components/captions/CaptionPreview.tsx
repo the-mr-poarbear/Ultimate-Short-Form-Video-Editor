@@ -30,6 +30,9 @@ export const CaptionPreview: React.FC<CaptionPreviewProps> = ({
     (w) => currentTime >= w.start && currentTime < w.end
   );
 
+  const activeWord = activeWordIdx !== -1 ? activeSegment.words[activeWordIdx] : null;
+  const isEmphasizedActive = Boolean(activeWord?.emphasized);
+
   // Group into chunks of maxWordsPerLine
   const maxWords = Math.max(style.maxWordsPerLine || 4, 2);
   const targetIdx = activeWordIdx !== -1 ? activeWordIdx : 0;
@@ -50,6 +53,46 @@ export const CaptionPreview: React.FC<CaptionPreviewProps> = ({
   const scaledLetterSpacing = `${((style.letterSpacing ?? 0) * previewScale).toFixed(2)}px`;
   const lineHeight = style.lineHeight ?? 1.25;
 
+  // Case 1: Active word is EMPHASIZED -> Render big, bold and centered on the screen!
+  if (isEmphasizedActive && activeWord) {
+    const empFontSize = Math.max(28, Math.round(scaledFontSize * 2.4));
+    const empStrokePx = Math.max(2, Math.round((style.strokeWidth ?? 3) * previewScale * 2.2));
+    const empShadowSpread = Math.max(4, Math.round(8 * previewScale));
+    const empShadowBlur = Math.max(12, Math.round(28 * previewScale));
+    const empHighlightColor = style.highlightColor || "#FFE600";
+    const empTextShadow = `-${empStrokePx}px -${empStrokePx}px 0 ${strokeColor}, ${empStrokePx}px -${empStrokePx}px 0 ${strokeColor}, -${empStrokePx}px ${empStrokePx}px 0 ${strokeColor}, ${empStrokePx}px ${empStrokePx}px 0 ${strokeColor}, 0 0 ${empShadowBlur}px ${empHighlightColor}99, 0 ${empShadowSpread}px ${empShadowBlur}px rgba(0,0,0,0.95)`;
+
+    return (
+      <div
+        className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 text-center px-4"
+      >
+        {/* Soft radial backdrop aura for contrast against busy backgrounds */}
+        <div
+          className="absolute inset-x-4 top-1/3 bottom-1/3 rounded-full opacity-60 pointer-events-none"
+          style={{
+            background: "radial-gradient(ellipse at center, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.2) 60%, transparent 80%)",
+          }}
+        />
+
+        <div
+          key={`emp-${activeWord.word}-${activeWord.start}`}
+          style={{
+            fontFamily: style.fontFamily || "Inter",
+            color: empHighlightColor,
+            textShadow: empTextShadow,
+            fontSize: `${empFontSize}px`,
+            lineHeight: 1.1,
+            letterSpacing: scaledLetterSpacing,
+          }}
+          className="anim-emphasize-punch font-black uppercase tracking-tight max-w-[95%] drop-shadow-2xl select-none"
+        >
+          {activeWord.word}
+        </div>
+      </div>
+    );
+  }
+
+  // Case 2: Standard caption position
   return (
     <div
       style={{
@@ -68,17 +111,26 @@ export const CaptionPreview: React.FC<CaptionPreviewProps> = ({
       >
         {currentChunk.map((w: WordTiming) => {
           const isHighlighted = currentTime >= w.start && currentTime < w.end;
+          const isWordEmphasized = Boolean(w.emphasized);
 
           return (
             <span
               key={`${w.word}-${w.start}`}
               style={{
                 fontFamily: style.fontFamily || "Inter",
-                color: isHighlighted ? (style.highlightColor || "#FFE600") : (style.textColor || "#FFFFFF"),
+                color: isHighlighted
+                  ? (style.highlightColor || "#FFE600")
+                  : isWordEmphasized
+                  ? (style.highlightColor || "#FFE600")
+                  : (style.textColor || "#FFFFFF"),
                 textShadow,
               }}
               className={`font-black uppercase tracking-tight transition-transform duration-75 inline-block ${
-                isHighlighted ? "scale-[1.12]" : "scale-100"
+                isHighlighted
+                  ? "scale-[1.12]"
+                  : isWordEmphasized
+                  ? "scale-[1.05] opacity-95"
+                  : "scale-100"
               }`}
             >
               {w.word}

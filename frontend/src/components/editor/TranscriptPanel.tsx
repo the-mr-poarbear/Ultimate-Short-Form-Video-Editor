@@ -20,6 +20,10 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   const setCaptionSettingsOpen = useEditorStore((s) => s.setCaptionSettingsOpen);
   const isSliceMode = useEditorStore((s) => s.isSliceMode);
   const setSliceMode = useEditorStore((s) => s.setSliceMode);
+  const isEmphasizeMode = useEditorStore((s) => s.isEmphasizeMode);
+  const setEmphasizeMode = useEditorStore((s) => s.setEmphasizeMode);
+  const toggleWordEmphasis = useEditorStore((s) => s.toggleWordEmphasis);
+  const clearAllEmphasis = useEditorStore((s) => s.clearAllEmphasis);
   const joinTranscriptions = useEditorStore((s) => s.joinTranscriptions);
   const canJoinTranscriptions = useEditorStore((s) => s.canJoinTranscriptions);
   const { seek } = useAudioPlayer();
@@ -32,10 +36,18 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   const transcript = project?.transcript || [];
   const containerRef = useRef<HTMLDivElement | null>(null);
 
+  const totalEmphasizedWords = transcript.reduce(
+    (acc, seg) => acc + (seg.words || []).filter((w) => w.emphasized).length,
+    0
+  );
+
   const handleSliceWord = (time: number) => {
     splitSliceAtTime(time);
-    seek(time);
-    setSliceFeedback(`New timeline slice created at ${time.toFixed(2)}s`);
+    const state = useEditorStore.getState();
+    const newSlice = state.project?.slices.find((s) => s.id === state.selectedSliceId);
+    const targetSeek = newSlice ? newSlice.start : time;
+    seek(targetSeek);
+    setSliceFeedback(`New timeline slice created at ${targetSeek.toFixed(2)}s`);
     setTimeout(() => setSliceFeedback(null), 2500);
   };
 
@@ -91,6 +103,21 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
             <span>Caption Style</span>
           </button>
 
+          {/* Emphasize Tool Button */}
+          <button
+            type="button"
+            onClick={() => setEmphasizeMode(!isEmphasizeMode)}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium transition-colors cursor-pointer ${
+              isEmphasizeMode
+                ? "bg-amber-400 text-black font-bold shadow-xs ring-1 ring-amber-300"
+                : "bg-surface-elevated hover:bg-surface-hover text-muted-foreground hover:text-foreground border border-border/50"
+            }`}
+            title="Toggle Center Emphasis Mode: click any word in transcript to display bold, big and centered on screen"
+          >
+            <Sparkles className={`w-2.5 h-2.5 ${isEmphasizeMode ? "text-black fill-current" : "text-amber-400"}`} />
+            <span>{isEmphasizeMode ? "Emphasize [ON]" : "Emphasize Tool"}</span>
+          </button>
+
           {/* Join Tool Button */}
           <button
             type="button"
@@ -137,6 +164,39 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
           )}
         </div>
       </div>
+
+      {/* Emphasize Mode Guidance Banner */}
+      {isEmphasizeMode && (
+        <div className="px-3 py-1.5 bg-amber-500/15 border-b border-amber-500/30 text-[10px] text-amber-300 flex items-center justify-between animate-in fade-in select-none">
+          <div className="flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3 text-amber-400 animate-pulse" />
+            <span>Click any word to toggle Center-Screen Emphasis (bold, big & centered on screen).</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {totalEmphasizedWords > 0 && (
+              <>
+                <span className="font-mono text-[9px] px-1.5 py-0.2 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                  {totalEmphasizedWords} centered
+                </span>
+                <button
+                  type="button"
+                  onClick={clearAllEmphasis}
+                  className="text-[9px] text-muted-foreground hover:text-foreground underline cursor-pointer"
+                  title="Clear emphasis from all words"
+                >
+                  Clear all
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => setEmphasizeMode(false)}
+              className="underline hover:text-white text-[9px] font-semibold cursor-pointer"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Slice Mode Guidance Banner */}
       {isSliceMode && (
@@ -234,8 +294,16 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                 segment={seg}
                 currentTime={currentTime}
                 isSliceMode={isSliceMode}
+                isEmphasizeMode={isEmphasizeMode}
                 onSeek={seek}
                 onSliceWord={handleSliceWord}
+                onToggleWordEmphasis={(wordIndex) => {
+                  toggleWordEmphasis(seg.id, wordIndex);
+                  const targetWord = seg.words?.[wordIndex];
+                  if (targetWord) {
+                    seek(targetWord.start);
+                  }
+                }}
                 onJoinWithNext={nextSeg ? () => handleJoin([seg.id, nextSeg.id]) : undefined}
                 canJoinWithNext={joinCheck?.canJoin}
                 joinDisabledReason={joinCheck?.reason}

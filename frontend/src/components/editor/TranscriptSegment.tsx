@@ -2,14 +2,16 @@ import React from "react";
 import type { TranscriptSegment as SegmentType } from "../../types/transcript";
 import { TranscriptWord } from "./TranscriptWord";
 import { formatTime } from "../../lib/formatting";
-import { Play, Merge, CheckSquare, Square, AlertCircle } from "lucide-react";
+import { Play, Merge, CheckSquare, Square, AlertCircle, Sparkles } from "lucide-react";
 
 interface TranscriptSegmentProps {
   segment: SegmentType;
   currentTime: number;
   isSliceMode?: boolean;
+  isEmphasizeMode?: boolean;
   onSeek: (time: number) => void;
   onSliceWord?: (time: number) => void;
+  onToggleWordEmphasis?: (wordIndex: number) => void;
   onJoinWithNext?: () => void;
   canJoinWithNext?: boolean;
   joinDisabledReason?: string;
@@ -22,8 +24,10 @@ export const TranscriptSegment: React.FC<TranscriptSegmentProps> = ({
   segment,
   currentTime,
   isSliceMode = false,
+  isEmphasizeMode = false,
   onSeek,
   onSliceWord,
+  onToggleWordEmphasis,
   onJoinWithNext,
   canJoinWithNext = true,
   joinDisabledReason,
@@ -33,6 +37,8 @@ export const TranscriptSegment: React.FC<TranscriptSegmentProps> = ({
 }) => {
   const isSegmentActive =
     currentTime >= segment.start && currentTime < segment.end;
+
+  const emphasizedWordsCount = (segment.words || []).filter((w) => w.emphasized).length;
 
   return (
     <div
@@ -75,6 +81,16 @@ export const TranscriptSegment: React.FC<TranscriptSegmentProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {emphasizedWordsCount > 0 && (
+            <div
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-400/15 border border-amber-400/30 text-amber-300"
+              title={`${emphasizedWordsCount} word(s) in this section appear bold, big and centered on screen`}
+            >
+              <Sparkles className="w-2 h-2 text-amber-400 fill-current" />
+              <span>{emphasizedWordsCount} centered</span>
+            </div>
+          )}
+
           {onJoinWithNext && (
             <button
               type="button"
@@ -111,10 +127,14 @@ export const TranscriptSegment: React.FC<TranscriptSegmentProps> = ({
             <TranscriptWord
               key={`${segment.id}-${idx}-${w.word}`}
               word={w}
+              wordIndex={idx}
+              segmentId={segment.id}
               currentTime={currentTime}
               isSliceMode={isSliceMode}
+              isEmphasizeMode={isEmphasizeMode}
               onClick={() => onSeek(w.start)}
               onSlice={() => onSliceWord?.(w.start)}
+              onToggleEmphasis={() => onToggleWordEmphasis?.(idx)}
             />
           ))
         ) : (
@@ -129,3 +149,4 @@ export const TranscriptSegment: React.FC<TranscriptSegmentProps> = ({
     </div>
   );
 };
+

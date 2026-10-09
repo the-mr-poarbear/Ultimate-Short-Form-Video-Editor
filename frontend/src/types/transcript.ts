@@ -3,6 +3,7 @@ export interface WordTiming {
   start: number;
   end: number;
   confidence?: number;
+  emphasized?: boolean;
 }
 
 export interface TranscriptSegment {

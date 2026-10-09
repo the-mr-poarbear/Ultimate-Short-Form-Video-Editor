@@ -121,7 +121,7 @@ class SliceGenerator:
             text=text
         )
 
-    def split_slice_at_time(self, slices: List[Slice], slice_id: str, split_time: float) -> List[Slice]:
+    def split_slice_at_time(self, slices: List[Slice], slice_id: str, split_time: float, duration: Optional[float] = None) -> List[Slice]:
         """Splits an existing slice at split_time into two slices."""
         new_slices = []
         for s in slices:
@@ -142,9 +142,9 @@ class SliceGenerator:
                 new_slices.extend([s1, s2])
             else:
                 new_slices.append(s)
-        return new_slices
+        return self.heal_slices(new_slices, duration)
 
-    def merge_slices(self, slices: List[Slice], first_id: str, second_id: str) -> List[Slice]:
+    def merge_slices(self, slices: List[Slice], first_id: str, second_id: str, duration: Optional[float] = None) -> List[Slice]:
         """Merges two contiguous slices into one."""
         s1 = next((s for s in slices if s.id == first_id), None)
         s2 = next((s for s in slices if s.id == second_id), None)
@@ -167,7 +167,7 @@ class SliceGenerator:
                 continue
             else:
                 new_slices.append(s)
-        return new_slices
+        return self.heal_slices(new_slices, duration)
 
     def heal_slices(self, slices: List[Slice], duration: Optional[float] = None) -> List[Slice]:
         """Ensures slices are strictly contiguous without gaps or missing spaces."""
